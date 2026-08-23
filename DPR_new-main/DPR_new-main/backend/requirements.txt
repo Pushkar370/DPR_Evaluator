@@ -1,0 +1,26 @@
+
+# Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+
+# Tasks & Queues
+celery
+redis
+
+# Data Processing
+PyMuPDF
+
+# Cloud/API Dependencies
+google-generativeai
+qdrant-client
+boto3   # For AWS Textract (Cloud OCR)
+
+# Utilities
+python-dotenv
+requests
+
+groq
+sentence-transformers
