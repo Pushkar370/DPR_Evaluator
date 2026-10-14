@@ -1,363 +1,148 @@
 /**
- * API Service Layer
- * ==================
- * Clean abstraction for backend communication
- * Handles all FastAPI endpoint calls
+ * API Service Layer for DPR Compliance & Multi-Agent Evaluation System
+ * ====================================================================
+ * Connects Frontend-DPR to the FastAPI LangGraph Backend.
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 
-// API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Create axios instance with defaults
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // 2 minutes for heavy analysis operations
+  timeout: 180000, // 3 minutes for deep multi-agent analysis
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor for auth tokens
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Response interceptor for error handling
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
-  }
-);
-
-// ============================================================
-// Type Definitions
-// ============================================================
-
-export type AnalysisStatus = 'pass' | 'fail' | 'warning' | 'pending';
-export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
-
-// Compliance Types
-export interface ComplianceItem {
-  rule_id: string;
-  rule_name: string;
-  status: AnalysisStatus;
-  requirement: string;
-  finding: string;
-  citation: string | null;
-  section_reference: string | null;
+export interface FindingItem {
+  pillar: string;
+  category: 'Strength' | 'Risk' | 'Deficiency' | 'Compliance Gap' | string;
+  description: string;
+  dpr_page: number;
+  guideline_reference?: string | null;
+  severity: 'Low' | 'Medium' | 'High' | 'Critical' | string;
 }
 
-export interface ComplianceResponse {
-  section_name: string;
-  overall_status: AnalysisStatus;
-  compliance_score: number;
-  checks_passed: number;
-  checks_failed: number;
-  items: ComplianceItem[];
-  missing_requirements: string[];
-  guideline_citations: string[];
-  rag_explanation: string;
-  processing_time_ms: number;
+export interface ConflictItem {
+  title: string;
+  pillars_involved: string[];
+  description: string;
+  resolution: string;
+  severity: 'Low' | 'Medium' | 'High' | 'Critical' | string;
 }
 
-export interface ComplianceRequest {
-  section_name: string;
-  section_text: string;
-  use_rag?: boolean;
-}
-
-// Feasibility Types
-export interface FeasibilityMetric {
-  metric_name: string;
-  proposed_value: number;
-  benchmark_value: number;
-  deviation_percent: number;
-  status: AnalysisStatus;
-  explanation: string;
-}
-
-export interface FeasibilityResponse {
-  overall_level: string;
-  overall_score: number;
-  cost_feasibility: FeasibilityMetric | null;
-  timeline_feasibility: FeasibilityMetric | null;
-  similar_projects_count: number;
-  rag_reasoning: string;
-  recommendations: string[];
-  risk_factors: string[];
-  processing_time_ms: number;
-}
-
-export interface FeasibilityRequest {
-  project_description: string;
-  proposed_cost_crore: number;
-  proposed_duration_months: number;
-  project_scope?: string;
-  project_type?: string;
-}
-
-// Consistency Types
-export interface InconsistencyItem {
-  inconsistency_id: string;
-  type: string;
-  severity: RiskLevel;
-  location_a: string;
-  value_a: string;
-  location_b: string;
-  value_b: string;
-  difference: number;
-  difference_percent: number;
-  rag_explanation: string;
-  probable_cause: string;
-  recommended_action: string;
-}
-
-export interface ConsistencyResponse {
-  is_consistent: boolean;
-  inconsistencies_found: number;
-  items: InconsistencyItem[];
-  processing_time_ms: number;
-}
-
-export interface ConsistencyRequest {
-  sections: Record<string, string>;
-}
-
-// Risk Types
-export interface RiskFactor {
-  factor_id: string;
-  factor_name: string;
-  category: string;
-  risk_level: RiskLevel;
+export interface PillarScorecard {
+  pillar: 'Technical' | 'Financial' | 'Administrative' | 'Social' | string;
   score: number;
-  evidence: string[];
-  mitigation_suggestion: string;
+  weight: number;
+  summary: string;
+  guidelines_status: string;
+  metrics: Record<string, any>;
+  findings: FindingItem[];
 }
 
-export interface RiskAssessmentResponse {
-  overall_risk_score: number;
-  overall_risk_level: RiskLevel;
-  financial_score: number;
-  timeline_score: number;
-  technical_score: number;
-  environmental_score: number;
-  implementation_score: number;
-  top_risks: string[];
-  factors: RiskFactor[];
-  rag_summary: string;
+export interface KeyProjectMetric {
+  label: string;
+  main_value: string;
+  sub_details?: string[];
+}
+
+export interface EvaluationSummary {
+  project_name?: string;
+  approval_status?: 'Approve' | 'Revise' | 'Reject' | 'Pending Review' | string;
+  overall_score?: number | null;
+  pillar_scores?: Record<string, number>;
+  slec_recommendation?: string;
+  key_project_metrics: KeyProjectMetric[];
+  flagged_risks: string[];
+  missing_sections: string[];
   recommendations: string[];
-  historical_evidence: string[];
-  processing_time_ms: number;
 }
 
-export interface RiskRequest {
-  dpr_text: string;
-  project_cost_crore?: number;
-  project_duration_months?: number;
+export interface DynamicInsight {
+  topic: string;
+  details: string;
+  risks: string[];
+  extracted_values: Record<string, any>;
 }
 
-// Full Analysis Types
-export interface FullAnalysisRequest {
-  sections: Record<string, string>;
-  project_description: string;
-  proposed_cost_crore: number;
-  proposed_duration_months: number;
-  project_scope?: string;
-  project_type?: string;
-}
-
-export interface FullAnalysisResponse {
-  analysis_timestamp: string;
-  overall_grade: string;
-  overall_score: number;
-  compliance: Record<string, ComplianceResponse> | null;
-  feasibility: FeasibilityResponse | null;
-  consistency: ConsistencyResponse | null;
-  risk: RiskAssessmentResponse | null;
+export interface AnalysisReport {
+  job_id: string;
+  status: 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
+  overall_score?: number | null;
+  verdict?: 'Approve' | 'Revise' | 'Reject' | string | null;
   executive_summary: string;
-  processing_time_ms: number;
+  evaluation_summary?: EvaluationSummary | null;
+  pillar_scorecards: PillarScorecard[];
+  conflicts: ConflictItem[];
+  insights: DynamicInsight[];
+  extracted_images?: Array<{ path: string; caption: string }>;
+  error_message?: string | null;
+  processing_time?: number | null;
 }
 
-// Document Types
-export interface DocumentUploadResponse {
-  message: string;
-  document_id: string;
+export interface HistoryItem {
+  job_id: string;
   filename: string;
-  chunks_created: number;
-  processing_time_ms: number;
+  status: string;
+  overall_score?: number | null;
+  verdict?: string | null;
+  processing_time?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
-export interface SearchResult {
-  chunk_id: string;
-  content: string;
-  section: string | null;
-  similarity_score: number;
-}
-
-export interface SearchResponse {
-  query: string;
-  results: SearchResult[];
-  total_results: number;
-}
-
-// ============================================================
-// API Functions
-// ============================================================
-
-/**
- * Analysis API
- */
-export const analysisApi = {
-  /**
-   * Run compliance check on a DPR section
-   */
-  checkCompliance: async (request: ComplianceRequest): Promise<ComplianceResponse> => {
-    const response = await apiClient.post<ComplianceResponse>('/analysis/compliance', request);
-    return response.data;
-  },
-
-  /**
-   * Analyze project feasibility
-   */
-  analyzeFeasibility: async (request: FeasibilityRequest): Promise<FeasibilityResponse> => {
-    const response = await apiClient.post<FeasibilityResponse>('/analysis/feasibility', request);
-    return response.data;
-  },
-
-  /**
-   * Check document consistency
-   */
-  checkConsistency: async (request: ConsistencyRequest): Promise<ConsistencyResponse> => {
-    const response = await apiClient.post<ConsistencyResponse>('/analysis/consistency', request);
-    return response.data;
-  },
-
-  /**
-   * Perform risk assessment
-   */
-  assessRisk: async (request: RiskRequest): Promise<RiskAssessmentResponse> => {
-    const response = await apiClient.post<RiskAssessmentResponse>('/analysis/risk', request);
-    return response.data;
-  },
-
-  /**
-   * Run full DPR analysis
-   */
-  runFullAnalysis: async (request: FullAnalysisRequest): Promise<FullAnalysisResponse> => {
-    const response = await apiClient.post<FullAnalysisResponse>('/analysis/full', request);
-    return response.data;
-  },
-};
-
-/**
- * Documents API
- */
-export const documentsApi = {
-  /**
-   * Upload a DPR document
-   */
-  upload: async (file: File): Promise<DocumentUploadResponse> => {
+export const dprApi = {
+  uploadDPR: async (file: File): Promise<{ job_id: string; message: string }> => {
     const formData = new FormData();
     formData.append('file', file);
-    
-    const response = await apiClient.post<DocumentUploadResponse>('/documents/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+    const res = await apiClient.post<{ job_id: string; message: string }>('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return response.data;
+    return res.data;
   },
 
-  /**
-   * Search documents
-   */
-  search: async (query: string, topK = 10): Promise<SearchResponse> => {
-    const response = await apiClient.post<SearchResponse>('/documents/search', { query, top_k: topK });
-    return response.data;
+  checkStatus: async (jobId: string): Promise<{ job_id: string; status: string; report?: AnalysisReport }> => {
+    const res = await apiClient.get<{ job_id: string; status: string; report?: AnalysisReport }>(`/status/${jobId}`);
+    return res.data;
   },
 
-  /**
-   * Get document statistics
-   */
-  getStats: async () => {
-    const response = await apiClient.get('/documents/stats');
-    return response.data;
+  getReport: async (jobId: string): Promise<AnalysisReport> => {
+    const res = await apiClient.get<AnalysisReport>(`/report/${jobId}`);
+    return res.data;
   },
 
-  /**
-   * Delete a document
-   */
-  delete: async (documentId: string) => {
-    const response = await apiClient.delete(`/documents/${documentId}`);
-    return response.data;
+  getReportsHistory: async (limit = 50): Promise<HistoryItem[]> => {
+    const res = await apiClient.get<{ jobs: HistoryItem[] }>(`/reports?limit=${limit}`);
+    return res.data.jobs;
+  },
+
+  getPillarScorecards: async (jobId: string): Promise<PillarScorecard[]> => {
+    const res = await apiClient.get<PillarScorecard[]>(`/report/${jobId}/pillars`);
+    return res.data;
+  },
+
+  getConflicts: async (jobId: string): Promise<ConflictItem[]> => {
+    const res = await apiClient.get<ConflictItem[]>(`/report/${jobId}/conflicts`);
+    return res.data;
+  },
+
+  askChatbot: async (jobId: string, query: string): Promise<string> => {
+    const res = await apiClient.post<{ answer: string }>('/chat', { job_id: jobId, query });
+    return res.data.answer;
+  },
+
+  getGuidelinesStatus: async () => {
+    const res = await apiClient.get('/guidelines/status');
+    return res.data;
+  },
+
+  ingestGuidelines: async () => {
+    const res = await apiClient.post('/guidelines/ingest');
+    return res.data;
   },
 };
 
-/**
- * Knowledge Base API
- */
-export const knowledgeApi = {
-  /**
-   * Upload a guideline document
-   */
-  upload: async (file: File, category?: string): Promise<DocumentUploadResponse> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (category) formData.append('category', category);
-    
-    const response = await apiClient.post<DocumentUploadResponse>('/knowledge/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
-  },
-
-  /**
-   * Ingest text content
-   */
-  ingestText: async (text: string, title?: string, category?: string) => {
-    const response = await apiClient.post('/knowledge/ingest-text', {
-      text,
-      title,
-      category,
-    });
-    return response.data;
-  },
-
-  /**
-   * Search knowledge base
-   */
-  search: async (query: string, limit = 5, category?: string): Promise<SearchResponse> => {
-    const response = await apiClient.post<SearchResponse>('/knowledge/search', {
-      query,
-      limit,
-      category,
-    });
-    return response.data;
-  },
-
-  /**
-   * Get knowledge base statistics
-   */
-  getStats: async () => {
-    const response = await apiClient.get('/knowledge/stats');
-    return response.data;
-  },
-};
-
-export default apiClient;
+export default dprApi;

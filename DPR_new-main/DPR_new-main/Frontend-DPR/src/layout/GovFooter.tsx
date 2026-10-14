@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Container, Typography, Link, Stack, Divider } from '@mui/material';
+import { Box, Typography, Link, Stack, Divider } from '@mui/material';
 
 const GovFooter: React.FC = () => {
   return (

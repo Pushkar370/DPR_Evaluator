@@ -49,6 +49,7 @@ Frontend-DPR/shared/node_modules/
 # Environment variables
 .env
 .env.local
+*.db
 
 # FAISS index (optional - remove if you want to track it)
 # rag_dpr/store/faiss.index
@@ -62,12 +63,15 @@ uploads/images/
 
 # Ignore all uploads
 uploads/*
-\!uploads/.gitkeep
-node_modules/\n.venv/\nvenv/\n__pycache__/\n*.pyc\n.env\n.DS_Store\nuploads/\nFrontend-DPR/dist/\nlocal_qdrant_data/
+!uploads/.gitkeep
 
-.env
-uploads/
+# Local stores and builds
+Frontend-DPR/dist/
+Frontend-DPR/node_modules/
 .venv/
 __pycache__/
-node_modules/
-Frontend-DPR/node_modules/
+*.pyc
+.env
+.DS_Store
+local_qdrant_data/
+

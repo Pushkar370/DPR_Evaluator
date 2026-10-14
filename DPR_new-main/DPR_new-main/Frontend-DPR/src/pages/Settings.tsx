@@ -7,7 +7,6 @@ import {
     Paper,
     Card,
     CardContent,
-    Divider,
     TextField,
     Button,
     Switch,
@@ -26,7 +25,7 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = () => {
     const [tabIndex, setTabIndex] = useState(0);
 
-    const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
         setTabIndex(newValue);
     };
 

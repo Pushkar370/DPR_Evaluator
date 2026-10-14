@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
 import { MOCK_DASHBOARD_STATS, MOCK_RECENT_ACTIVITY, MOCK_BAR_CHART_DATA, MOCK_DOUGHNUT_DATA } from '../../constants';
-import { StatsGrid, ChartsSection, RecentActivityTable } from './';
+import { StatsGrid } from './StatsGrid';
+import { ChartsSection } from './ChartsSection';
+import { RecentActivityTable } from './RecentActivityTable';
 
 // Chart.js Imports
 import {

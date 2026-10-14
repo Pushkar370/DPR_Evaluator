@@ -15,7 +15,7 @@ import {
     CircularProgress,
     Stack
 } from '@mui/material';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import ForestIcon from '@mui/icons-material/Forest';
@@ -30,7 +30,7 @@ import WarningIcon from '@mui/icons-material/Warning';
 import icon from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
-let DefaultIcon = L.icon({
+const DefaultIcon = L.icon({
     iconUrl: icon,
     shadowUrl: iconShadow,
     iconSize: [25, 41],
@@ -64,7 +64,7 @@ const GeospatialVerification: React.FC = () => {
                     })
                 });
                 const data = await response.json();
-                let jsonStr = data.answer.replace(/```json/g, '').replace(/```/g, '').trim();
+                const jsonStr = data.answer.replace(/```json/g, '').replace(/```/g, '').trim();
                 const loc = JSON.parse(jsonStr);
                 if (loc && loc.lat && loc.long) {
                     setCenter([loc.lat, loc.long]);
