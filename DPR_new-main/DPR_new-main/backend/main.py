@@ -1,17 +1,14 @@
 """
 FastAPI backend for DPR Compliance Analysis System.
-Serves the React Frontend and orchestrates OCR + RAG pipelines.
+Orchestrates LangGraph Multi-Agent Evaluation, SQLite Persistence, and RAG.
 """
 
-import os
 import sys
 import uuid
-import shutil
 import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-# Fix for Windows asyncio event loop policy
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -19,27 +16,32 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.schemas import UploadResponse, StatusResponse, AnalysisReport, ChatRequest, ChatResponse
+from backend.schemas import (
+    UploadResponse,
+    StatusResponse,
+    AnalysisReport,
+    ChatRequest,
+    ChatResponse,
+    HistoryResponse,
+    HistoryItem,
+    PillarScorecard,
+    ConflictItem
+)
 from backend.config import settings
 from backend.services import (
     process_dpr_file,
     get_job_status,
     ask_chatbot
 )
-
-# ============================================================================
-# FastAPI Application Setup
-# ============================================================================
+from backend.database import list_jobs, get_guideline_stats
+from backend.guidelines_service import ingest_all_guidelines
+from backend.rag_service import document_rag
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Backend API for analyzing government DPR documents via Cloud OCR + RAG",
+    description="Backend API for analyzing government DPR documents via LangGraph Multi-Agent RAG System",
     version=settings.VERSION
 )
-
-# ============================================================================
-# CORS Configuration
-# ============================================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,273 +52,160 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================================
-# Configuration (From Config)
-# ============================================================================
-
 UPLOADS_DIR = Path(settings.UPLOADS_DIR)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ============================================================================
-# Lifespan Events (Startup/Shutdown)
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """
-    Initialize system requirements on application startup.
-    With Cloud Providers, no heavy ML models need to be loaded into VRAM locally.
-    """
-    print("\n" + "=" * 70)
-    print(f"[STARTUP] {settings.APP_NAME} Startup")
-    print("=" * 70 + "\n")
-    print("[OK] Cloud API modes enabled. Setup completed successfully!")
-    print("=" * 70 + "\n")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Cleanup on shutdown.
-    """
-    print(f"\n[SHUTDOWN] {settings.APP_NAME} shutting down...")
-
-
-# ============================================================================
-# Health Check
-# ============================================================================
-
 @app.get("/health")
 async def health_check():
-    """
-    Health check endpoint for the API.
-    """
     return {
         "status": "healthy",
-        "service": "DPR Compliance Analysis API",
-        "version": "1.0.0"
+        "service": settings.APP_NAME,
+        "version": settings.VERSION,
+        "multi_agent_framework": "LangGraph",
+        "guidelines_loaded": document_rag.has_guidelines()
     }
-
-
-# ============================================================================
-# File Upload Endpoint
-# ============================================================================
 
 @app.post("/upload", response_model=UploadResponse)
 async def upload_pdf(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None
 ):
-    """
-    Upload a PDF file for DPR compliance analysis.
-    
-    - Saves the file to the uploads directory
-    - Triggers background processing
-    - Returns a job_id to track progress
-    
-    Args:
-        file: PDF file to upload
-        background_tasks: FastAPI background tasks
-        
-    Returns:
-        UploadResponse with job_id
-        
-    Raises:
-        HTTPException: If file is invalid or upload fails
-    """
-    
-    # Validate file type
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are supported"
-        )
-    
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported (.pdf)")
+
     try:
-        # Generate unique job ID
+        contents = await file.read()
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty (0 bytes)")
+        if len(contents) > 100 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File size exceeds maximum limit of 100MB")
+
         job_id = str(uuid.uuid4())[:8].upper()
-        
-        # Create safe file path
         file_path = UPLOADS_DIR / f"{job_id}_{file.filename}"
         
-        # Save uploaded file
-        contents = await file.read()
         with open(file_path, 'wb') as f:
             f.write(contents)
         
-        print(f"\n📁 File uploaded: {job_id} ({len(contents) / 1024:.1f} KB)")
-        
-        # Trigger background processing
         if background_tasks:
             background_tasks.add_task(
                 process_dpr_file,
                 job_id,
                 str(file_path)
             )
-            print(f"🔄 Background task started for job: {job_id}\n")
-        
-        return UploadResponse(job_id=job_id)
-        
+
+        return UploadResponse(job_id=job_id, message="File uploaded successfully. Multi-agent analysis initiated.")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"File upload failed: {str(e)}"
-        )
-
-
-# ============================================================================
-# Status Check Endpoint
-# ============================================================================
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
 @app.get("/status/{job_id}", response_model=StatusResponse)
 async def check_status(job_id: str):
-    """
-    Check the status of a DPR analysis job.
-    
-    Args:
-        job_id: The job ID returned from /upload
-        
-    Returns:
-        StatusResponse with current status and report (if completed)
-        
-    Raises:
-        HTTPException: If job_id is not found
-    """
-    
     report = get_job_status(job_id)
-    
     if report is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job '{job_id}' not found. Please upload a file first."
-        )
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     
-    # If completed, return full report; otherwise just status
     return StatusResponse(
         job_id=job_id,
         status=report.status,
         report=report if report.status in ["COMPLETED", "FAILED"] else None
     )
 
-
-# ============================================================================
-# Report Endpoint (Get Full Report)
-# ============================================================================
-
 @app.get("/report/{job_id}", response_model=AnalysisReport)
 async def get_report(job_id: str):
-    """
-    Retrieve the full analysis report for a completed job.
-    
-    Args:
-        job_id: The job ID
-        
-    Returns:
-        Full AnalysisReport
-        
-    Raises:
-        HTTPException: If job not found or not completed
-    """
-    
     report = get_job_status(job_id)
-    
     if report is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job '{job_id}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     
     if report.status == "PROCESSING":
-        raise HTTPException(
-            status_code=202,  # Accepted - still processing
-            detail="Job is still processing. Check status again later."
-        )
-    
-    if report.status == "FAILED":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job failed: {report.error_message}"
-        )
+        raise HTTPException(status_code=202, detail="Job is still processing.")
     
     return report
 
+@app.get("/reports", response_model=HistoryResponse)
+async def get_all_reports(limit: int = 50):
+    """Fetches job history directly from SQLite database."""
+    jobs = list_jobs(limit=limit)
+    history_items = [
+        HistoryItem(
+            job_id=j["job_id"],
+            filename=j["filename"],
+            status=j["status"],
+            overall_score=j.get("overall_score"),
+            verdict=j.get("verdict"),
+            processing_time=j.get("processing_time"),
+            created_at=str(j.get("created_at")),
+            updated_at=str(j.get("updated_at"))
+        )
+        for j in jobs
+    ]
+    return HistoryResponse(jobs=history_items)
 
-# ============================================================================# Chatbot Endpoint
-# ============================================================================  
+@app.get("/report/{job_id}/pillars", response_model=List[PillarScorecard])
+async def get_pillar_scorecards(job_id: str):
+    report = get_job_status(job_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return report.pillar_scorecards
+
+@app.get("/report/{job_id}/conflicts", response_model=List[ConflictItem])
+async def get_job_conflicts(job_id: str):
+    report = get_job_status(job_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return report.conflicts
+
+@app.post("/guidelines/ingest")
+async def trigger_guidelines_ingestion():
+    """Triggers indexing of all guideline PDFs in the guidelines/ folder."""
+    result = ingest_all_guidelines()
+    return result
+
+@app.get("/guidelines/status")
+async def get_guidelines_status():
+    """Returns the current ingestion status of guidelines per pillar."""
+    stats = get_guideline_stats()
+    return {
+        "has_guidelines": document_rag.has_guidelines(),
+        "pillar_stats": stats,
+        "guidelines_dir": settings.GUIDELINES_DIR
+    }
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_document(request: ChatRequest):
-    """
-    RAG-powered Chatbot endpoint. Answers questions based on the uploaded document.
-    """
     try:
         answer = ask_chatbot(request.job_id, request.query)
-        if not answer:
-            raise HTTPException(status_code=404, detail="Document context not found or indexing incomplete.")
         return ChatResponse(answer=answer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============================================================================  # Root Endpoint
-# ============================================================================
-
 @app.get("/")
 async def root():
-    """
-    API root endpoint with documentation links.
-    """
     return {
-        "message": "DPR Compliance Analysis API",
+        "message": settings.APP_NAME,
+        "framework": "LangGraph Multi-Agent (5 Agents: 4 Pillars + 1 Manager)",
         "docs": "http://localhost:8000/docs",
-        "redoc": "http://localhost:8000/redoc",
         "endpoints": {
             "health": "GET /health",
             "upload": "POST /upload",
             "status": "GET /status/{job_id}",
-            "report": "GET /report/{job_id}"
+            "report": "GET /report/{job_id}",
+            "reports_history": "GET /reports",
+            "pillars": "GET /report/{job_id}/pillars",
+            "conflicts": "GET /report/{job_id}/conflicts",
+            "guidelines_status": "GET /guidelines/status",
+            "guidelines_ingest": "POST /guidelines/ingest",
+            "chat": "POST /chat"
         }
     }
 
-
-# ============================================================================
-# Error Handlers
-# ============================================================================
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """
-    Global exception handler for unhandled errors.
-    """
     return JSONResponse(
         status_code=500,
-        content={
-            "error": "Internal Server Error",
-            "detail": str(exc)
-        }
+        content={"error": "Internal Server Error", "detail": str(exc)}
     )
-
-
-# ============================================================================
-# Run (Development)
-# ============================================================================
 
 if __name__ == "__main__":
     import uvicorn
-    
-    print("\n" + "=" * 70)
-    print("🚀 Starting DPR Backend Server")
-    print("=" * 70)
-    print("📍 API URL: http://localhost:8000")
-    print("📚 Docs: http://localhost:8000/docs")
-    print("=" * 70 + "\n")
-    
-    # Note: Must run from ROOT directory for sys.path to work correctly
-    # Run with: uvicorn backend.main:app --reload --port 8000
-    
-    uvicorn.run(
-        "backend.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)

@@ -13,7 +13,6 @@ import {
   ListSubheader
 } from '@mui/material';
 import DashboardIcon from '@mui/icons-material/Dashboard';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import MapIcon from '@mui/icons-material/Map';
 import SettingsIcon from '@mui/icons-material/Settings';

@@ -1,82 +1,84 @@
 @echo off
 REM ==========================================================================
-REM DPR Compliance Analysis System - Quick Start Script
+REM DPR Compliance Analysis System - Quick Start Script (Windows)
 REM ==========================================================================
-REM This script sets up and runs the complete integrated system
-REM
-
 setlocal enabledelayedexpansion
 
 echo.
 echo ==========================================================================
-echo   DPR Compliance Analysis System - Quick Start
+echo   DPR Compliance & Quality Assessment System (LangGraph Multi-Agent)
 echo ==========================================================================
 echo.
 
-REM Get the root directory
-for %%A in ("%~dp0.") do set "ROOT_DIR=%%~dpA"
-cd /d "%ROOT_DIR%"
+REM Navigate to project root
+set "SCRIPT_DIR=%~dp0"
+cd /d "%SCRIPT_DIR%"
 
-echo [1/7] Checking Python installation...
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo ❌ Python not found! Please install Python 3.9 or higher.
-    pause
-    exit /b 1
-)
-echo ✅ Python found
-
-echo.
-echo [2/7] Checking GPU availability...
-python -c "import torch; print('✅ GPU Available: ' + str(torch.cuda.is_available()))" 2>nul || (
-    echo ⚠️  GPU check failed. Ensure PyTorch is installed.
-)
-
-echo.
-echo [3/7] Installing backend dependencies...
-pip install -q -r backend\requirements.txt
-if errorlevel 1 (
-    echo ❌ Failed to install backend dependencies!
-    pause
-    exit /b 1
-)
-echo ✅ Backend dependencies installed
-
-echo.
-echo [4/7] Verifying uploads directory...
-if not exist uploads mkdir uploads
-echo ✅ Uploads directory ready
-
-echo.
-echo [5/7] Building RAG FAISS index (if needed)...
-if not exist rag_dpr\store\faiss.index (
-    echo ⚠️  FAISS index not found. Run:
-    echo    cd rag_dpr
-    echo    python -m ingest.build_knowledge
-    echo    cd ..
-    echo Then restart this script.
+echo [1/5] Checking Python environment...
+if exist ".venv\Scripts\python.exe" (
+    set "PYTHON_EXE=.venv\Scripts\python.exe"
+    echo [OK] Using virtual environment (.venv)
 ) else (
-    echo ✅ FAISS index exists
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Python not found. Please install Python 3.10+ and add it to PATH.
+        pause
+        exit /b 1
+    )
+    set "PYTHON_EXE=python"
+    echo [OK] Using system Python
+)
+
+echo.
+echo [2/5] Checking Environment Configuration (.env)...
+if not exist ".env" (
+    if exist ".env.example" (
+        copy .env.example .env >nul
+        echo [INFO] Created .env from .env.example. Please add your GEMINI_API_KEY_1 in .env
+    ) else (
+        echo [WARN] .env not found. Please create .env with your LLM API keys.
+    )
+) else (
+    echo [OK] .env file detected
+)
+
+echo.
+echo [3/5] Verifying SQLite database and Qdrant guidelines collection...
+"%PYTHON_EXE%" -c "from backend.database import init_db; init_db(); print('[OK] SQLite schema verified')"
+"%PYTHON_EXE%" -c "from backend.rag_service import document_rag; print('[OK] Qdrant status: Guidelines loaded = ' + str(document_rag.has_guidelines()))"
+
+echo.
+echo [4/5] Checking Node.js and Frontend dependencies...
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Node.js/npm not found. Please install Node.js 18+ to run the frontend.
+) else (
+    if not exist "Frontend-DPR\node_modules" (
+        echo [INFO] Installing frontend dependencies...
+        cd Frontend-DPR && npm install && cd ..
+    ) else (
+        echo [OK] Frontend dependencies installed
+    )
 )
 
 echo.
 echo ==========================================================================
-echo   ✅ Setup Complete!
+echo   Setup Verification Complete!
 echo ==========================================================================
 echo.
-echo To run the complete system, open TWO SEPARATE terminals:
+echo To launch the system, run in TWO separate terminal windows:
 echo.
-echo TERMINAL 1 - Backend (from root directory):
-echo   cd /d "%ROOT_DIR%"
-echo   uvicorn backend.main:app --reload --port 8000
+echo Terminal 1 - Backend:
+echo   cd "%SCRIPT_DIR%"
+echo   .venv\Scripts\python.exe -m uvicorn backend.main:app --port 8000
 echo.
-echo TERMINAL 2 - Frontend (in a new terminal):
-echo   cd /d "%ROOT_DIR%\Frontend-DPR\frontend"
+echo Terminal 2 - Frontend:
+echo   cd "%SCRIPT_DIR%\Frontend-DPR"
 echo   npm run dev
 echo.
-echo Then open: http://localhost:5173
-echo.
-echo API Docs:  http://localhost:8000/docs
+echo UI Dashboard: http://localhost:3000
+echo API Docs:     http://localhost:8000/docs
+echo Health Check: http://localhost:8000/health
 echo ==========================================================================
 echo.
 pause

@@ -15,9 +15,7 @@ import {
     InputAdornment,
     Button,
     Stack,
-    Pagination,
-    Menu,
-    MenuItem
+    Pagination
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
@@ -150,7 +148,7 @@ const AllDocuments: React.FC = () => {
                 </TableContainer>
 
                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                    <Pagination count={3} color="primary" page={page} onChange={(e, v) => setPage(v)} />
+                    <Pagination count={3} color="primary" page={page} onChange={(_, v) => setPage(v)} />
                 </Box>
             </Paper>
         </Box>

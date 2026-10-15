@@ -1,0 +1,7 @@
+{
+  "typescript.tsdk": "DPR_new-main/DPR_new-main/Frontend-DPR/node_modules/typescript/lib",
+  "eslint.workingDirectories": [
+    "DPR_new-main/DPR_new-main/Frontend-DPR"
+  ],
+  "python.defaultInterpreterPath": "DPR_new-main/DPR_new-main/.venv/Scripts/python.exe"
+}

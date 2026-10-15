@@ -12,7 +12,6 @@ import {
     Card,
     CardContent,
     Switch,
-    FormControlLabel,
     Chip
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';

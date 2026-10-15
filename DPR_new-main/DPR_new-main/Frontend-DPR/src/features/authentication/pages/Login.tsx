@@ -1,6 +1,5 @@
 import React from 'react';
 import { Box, Paper, Typography, Container, Stack } from '@mui/material';
-import { User } from '../../../types';
 import { LoginBranding, LoginForm } from '../components';
 
 const Login: React.FC = () => {
