@@ -22,42 +22,41 @@ Primary capabilities:
 
 ```mermaid
 graph TD
-    subgraph FE [Frontend - React + TypeScript + Vite + MUI]
-        A1[Upload DPR PDF / Scanned Doc]
-        A2[Status Polling & Real-time Progress]
-        A3[4-Pillar Scorecards & Conflict Cards]
-        A4[History Archive View]
-        A5[RAG Chatbot Assistant]
+    subgraph FE ["Frontend (React + TypeScript + Vite + MUI)"]
+        A1["Upload DPR PDF / Scanned Doc"]
+        A2["Status Polling & Real-time Progress"]
+        A3["4-Pillar Scorecards & Conflict Cards"]
+        A4["History Archive View"]
+        A5["RAG Chatbot Assistant"]
     end
 
-    subgraph BE [Backend - FastAPI]
-        B1[/POST /upload/]
-        B2[PDF & Vision OCR Pipeline]
-        B3[RAG Vector Ingestion]
-        B4[LangGraph Multi-Agent Engine]
-        B5[/GET /status/{job_id}/]
-        B6[/GET /report/{job_id}/]
-        B7[/GET /reports/ - SQLite History]
-        B8[/POST /chat/ - RAG Assistant]
+    subgraph BE ["Backend (FastAPI)"]
+        B1["POST /upload"]
+        B2["PDF & Vision OCR Pipeline"]
+        B3["RAG Vector Ingestion"]
+        B4["LangGraph Multi-Agent Engine"]
+        B5["GET /status/:job_id"]
+        B6["GET /report/:job_id"]
+        B7["GET /reports - SQLite History"]
+        B8["POST /chat - RAG Assistant"]
     end
 
-    subgraph STORE [Data & Vector Stores]
-        C1[(uploads/ PDF & Image artifacts)]
-        C2[(Qdrant: dpr_documents & dpr_guidelines)]
-        C3[(SQLite: dpr_evaluation.db)]
+    subgraph STORE ["Data & Vector Stores"]
+        C1[("uploads/ PDF & Image artifacts")]
+        C2[("Qdrant: dpr_documents & dpr_guidelines")]
+        C3[("SQLite: dpr_evaluation.db")]
     end
 
-    subgraph LLM_POOL [LLM Key Pool Manager]
-        D1[Gemini Key Pool - Manager & Vision OCR]
-        D2[Groq / Gemini Secondary - Pillar Agents]
-        D3[Round-Robin Rotation, Backoff & Error Sanitization]
+    subgraph LLM_POOL ["LLM Key Pool Manager"]
+        D1["Gemini Key Pool - Manager & Vision OCR"]
+        D2["Groq / Gemini Secondary - Pillar Agents"]
+        D3["Round-Robin Rotation, Backoff & Error Sanitization"]
     end
 
     A1 --> B1
     B1 --> C1
     B1 --> B2
     B2 --> B3
-    B3 --> C2
     B3 --> C2
     B2 --> B4
     B4 --> LLM_POOL
@@ -93,23 +92,23 @@ sequenceDiagram
     API->>Manager: Step 1: Analyze TOC/Summary & Plan Directives
     Manager-->>Pillars: Step 2: Fan-out tailored queries
     par Technical Agent (30%)
-        Pillars->>Pillars: Query 15 DPR chunks + Guidelines -> Score & Citations
+        Pillars->>Pillars: Query 15 DPR chunks + Guidelines => Score & Citations
     and Financial Agent (30%)
-        Pillars->>Pillars: Query 15 DPR chunks + Guidelines -> Score & Citations
+        Pillars->>Pillars: Query 15 DPR chunks + Guidelines => Score & Citations
     and Administrative Agent (20%)
-        Pillars->>Pillars: Query 15 DPR chunks + Guidelines -> Score & Citations
+        Pillars->>Pillars: Query 15 DPR chunks + Guidelines => Score & Citations
     and Social & Environmental (20%)
-        Pillars->>Pillars: Query 15 DPR chunks + Guidelines -> Score & Citations
+        Pillars->>Pillars: Query 15 DPR chunks + Guidelines => Score & Citations
     end
     Pillars->>Manager: Step 3: Fan-in pillar evaluations
     Manager->>Manager: Cross-reference & resolve contradictions
     Manager->>Manager: Compute weighted score & issue verdict (Approve/Revise/Reject)
     Manager->>DB: Step 4: Persist job, scorecards, findings & conflicts
     loop Poll status
-        User->>API: GET /status/{job_id}
+        User->>API: GET /status/:job_id
         API-->>User: PROCESSING -> COMPLETED
     end
-    User->>API: GET /report/{job_id}
+    User->>API: GET /report/:job_id
     API-->>User: Full AnalysisReport (Scorecards, Citations, Verdict)
 ```
 

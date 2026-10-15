@@ -18,22 +18,22 @@ This platform implements an AI-assisted Detailed Project Report (DPR) evaluation
 
 ```mermaid
 flowchart LR
-    U[User in Browser] --> F[React Frontend\nFrontend-DPR/]
-    F -->|POST /upload| A[FastAPI Backend\nbackend/main.py]
-    F -->|GET /status/{job_id}| A
-    F -->|GET /report/{job_id}| A
-    F -->|GET /reports| A
-    F -->|POST /chat| A
+    U["User in Browser"] --> F["React Frontend<br/>(Frontend-DPR/)"]
+    F -->|"POST /upload"| A["FastAPI Backend<br/>(backend/main.py)"]
+    F -->|"GET /status/:job_id"| A
+    F -->|"GET /report/:job_id"| A
+    F -->|"GET /reports"| A
+    F -->|"POST /chat"| A
 
-    A --> S[services.py\nJob orchestration]
-    S --> X[extraction.py\nPyMuPDF + Vision OCR]
-    S --> R[rag_service.py\nSentence-Transformers + Qdrant]
-    S --> LG[multi_agent/graph.py\nLangGraph StateGraph]
+    A --> S["services.py<br/>Job orchestration"]
+    S --> X["extraction.py<br/>PyMuPDF + Vision OCR"]
+    S --> R["rag_service.py<br/>Sentence-Transformers + Qdrant"]
+    S --> LG["multi_agent/graph.py<br/>LangGraph StateGraph"]
 
-    R --> Q[(Local Qdrant store\nlocal_qdrant_data/)]
-    X --> I[(uploads/)]
-    LG --> DB[(SQLite: dpr_evaluation.db)]
-    LG --> LLM[(LLM Pool: Gemini + Groq)]
+    R --> Q[("Local Qdrant Store<br/>(local_qdrant_data/)")]
+    X --> I[("Uploaded Files<br/>(uploads/)")]
+    LG --> DB[("SQLite Database<br/>(dpr_evaluation.db)")]
+    LG --> LLM[("LLM Key Pool<br/>(Gemini + Groq)")]
 ```
 
 ---
