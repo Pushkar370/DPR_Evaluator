@@ -209,7 +209,18 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173` to access the dashboard.
+Visit `http://localhost:3000` to access the dashboard.
+
+---
+
+## 📚 Documentation Index
+
+| Guide | Description |
+|---|---|
+| [**RUN_GUIDE.md**](./RUN_GUIDE.md) | **Step-by-step clean machine setup** (PowerShell, macOS, Linux) & troubleshooting table |
+| [**PROJECT_OVERVIEW.md**](./docs/PROJECT_OVERVIEW.md) | **System objective, scoring rubric**, weights, and data models |
+| [**ARCHITECTURE_AND_INTERVIEW_BRIEF.md**](./docs/ARCHITECTURE_AND_INTERVIEW_BRIEF.md) | **Technical defense**, LangGraph StateGraph, and Q&A |
+| [**Frontend README**](./DPR_new-main/DPR_new-main/Frontend-DPR/README.md) | Frontend component hierarchy, design tokens, and state management |
 
 ---
 
@@ -241,3 +252,4 @@ Run unit tests and end-to-end integration tests:
 | `GET` | `/guidelines/status` | Ingested guideline chunks count per pillar |
 | `POST` | `/guidelines/ingest` | Trigger re-indexing of `guidelines/` directory |
 | `POST` | `/chat` | RAG-powered chatbot answering questions on the DPR |
+

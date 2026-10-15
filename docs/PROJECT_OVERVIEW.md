@@ -13,7 +13,7 @@ Primary capabilities:
 - **Semantic retrieval** with local Sentence-Transformers embeddings (`all-MiniLM-L6-v2`, 384-dim) and local Qdrant collections
 - **LangGraph Multi-Agent Architecture**: 4 specialized pillar agents (Technical, Financial, Administrative, Social) running in parallel, orchestrated by 1 Manager Agent
 - **Conflict Resolution & Weighted Scoring**: Manager reconciles cross-pillar discrepancies and calculates a formal composite score and verdict (Approve / Revise / Reject)
-- **Persistent Storage**: SQLite database for job history, pillar evaluations, page-cited findings, and conflict logs
+- **Persistent Storage**: SQLite database (`dpr_evaluation.db`) for job history, pillar evaluations, page-cited findings, and conflict logs
 - **Modern React Dashboard**: Material-UI frontend with independent pillar scorecards, page citations, conflict resolution cards, and backend history
 
 ---
@@ -48,15 +48,16 @@ graph TD
     end
 
     subgraph LLM_POOL [LLM Key Pool Manager]
-        D1[Groq Llama-3.3-70B - Parallel Pillars]
-        D2[Gemini 1.5 Flash - Manager & Vision OCR]
-        D3[Round-Robin Rotation & Auto-Fallback]
+        D1[Gemini Key Pool - Manager & Vision OCR]
+        D2[Groq / Gemini Secondary - Pillar Agents]
+        D3[Round-Robin Rotation, Backoff & Error Sanitization]
     end
 
     A1 --> B1
     B1 --> C1
     B1 --> B2
     B2 --> B3
+    B3 --> C2
     B3 --> C2
     B2 --> B4
     B4 --> LLM_POOL
@@ -82,7 +83,7 @@ sequenceDiagram
     participant API as FastAPI Backend
     participant Ingest as Extraction & Qdrant
     participant Manager as Manager Agent (Gemini Flash)
-    participant Pillars as 4 Pillar Agents (Groq 70B)
+    participant Pillars as 4 Pillar Agents (Groq 70B / Gemini)
     participant DB as SQLite (dpr_evaluation.db)
 
     User->>API: POST /upload (PDF file)
