@@ -28,6 +28,7 @@ def init_db(db_path: Optional[str] = None):
             filename TEXT NOT NULL,
             file_path TEXT NOT NULL,
             status TEXT NOT NULL, -- PROCESSING, COMPLETED, FAILED
+            current_step TEXT,
             overall_score REAL,
             verdict TEXT,         -- Approve, Revise, Reject
             processing_time REAL,
@@ -38,6 +39,12 @@ def init_db(db_path: Optional[str] = None):
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
+
+        # Migration helper for current_step column
+        try:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN current_step TEXT;")
+        except Exception:
+            pass
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS pillar_evaluations (
@@ -96,34 +103,39 @@ def init_db(db_path: Optional[str] = None):
     finally:
         conn.close()
 
-def create_job(job_id: str, filename: str, file_path: str, db_path: Optional[str] = None):
+def create_job(job_id: str, filename: str, file_path: str, initial_step: str = "1/5: Document Extraction & OCR", db_path: Optional[str] = None):
     conn = get_connection(db_path)
     try:
         with conn:
             conn.execute(
                 """
-                INSERT INTO jobs (job_id, filename, file_path, status, created_at, updated_at)
-                VALUES (?, ?, ?, 'PROCESSING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                INSERT INTO jobs (job_id, filename, file_path, status, current_step, created_at, updated_at)
+                VALUES (?, ?, ?, 'PROCESSING', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(job_id) DO UPDATE SET
                     status = 'PROCESSING',
+                    current_step = excluded.current_step,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (job_id, filename, file_path)
+                (job_id, filename, file_path, initial_step)
             )
     finally:
         conn.close()
 
-def update_job_status(job_id: str, status: str, error_message: Optional[str] = None, processing_time: Optional[float] = None, db_path: Optional[str] = None):
+def update_job_status(job_id: str, status: str, current_step: Optional[str] = None, error_message: Optional[str] = None, processing_time: Optional[float] = None, db_path: Optional[str] = None):
     conn = get_connection(db_path)
     try:
         with conn:
             conn.execute(
                 """
                 UPDATE jobs
-                SET status = ?, error_message = ?, processing_time = COALESCE(?, processing_time), updated_at = CURRENT_TIMESTAMP
+                SET status = ?,
+                    current_step = COALESCE(?, current_step),
+                    error_message = ?,
+                    processing_time = COALESCE(?, processing_time),
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE job_id = ?
                 """,
-                (status, error_message, processing_time, job_id)
+                (status, current_step, error_message, processing_time, job_id)
             )
     finally:
         conn.close()
@@ -146,7 +158,7 @@ def save_job_result(
             conn.execute(
                 """
                 UPDATE jobs
-                SET status = ?, overall_score = ?, verdict = ?, processing_time = ?,
+                SET status = ?, current_step = 'Evaluation Completed', overall_score = ?, verdict = ?, processing_time = ?,
                     executive_summary = ?, slec_recommendation = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE job_id = ?
                 """,

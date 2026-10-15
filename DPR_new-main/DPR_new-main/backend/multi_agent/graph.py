@@ -12,17 +12,23 @@ from backend.multi_agent.pillar_agents import (
     run_administrative_agent,
     run_social_agent
 )
-from backend.database import save_job_result
+from backend.database import save_job_result, update_job_status
 
 logger = logging.getLogger(__name__)
 
 def plan_node(state: DPRGraphState) -> Dict[str, Any]:
-    logger.info(f"--- [LANGGRAPH STEP 1] MANAGER PLANNING (Job {state.get('job_id')}) ---")
+    job_id = state.get("job_id", "")
+    if job_id:
+        update_job_status(job_id, status="PROCESSING", current_step="Step 3/5: Manager Agent analyzing Table of Contents & planning pillar directives...")
+    logger.info(f"--- [LANGGRAPH STEP 1] MANAGER PLANNING (Job {job_id}) ---")
     plan = plan_dpr_evaluation(state.get("dpr_text", ""), state.get("total_pages", 1))
     return {"manager_plan": plan}
 
 def technical_node(state: DPRGraphState) -> Dict[str, Any]:
-    logger.info(f"--- [LANGGRAPH STEP 2A] TECHNICAL PILLAR EVALUATION (Job {state.get('job_id')}) ---")
+    job_id = state.get("job_id", "")
+    if job_id:
+        update_job_status(job_id, status="PROCESSING", current_step="Step 4/5: 4 Pillar Agents running parallel evaluation (Technical, Financial, Admin, Social)...")
+    logger.info(f"--- [LANGGRAPH STEP 2A] TECHNICAL PILLAR EVALUATION (Job {job_id}) ---")
     result = run_technical_agent(state.get("job_id", ""))
     return {"technical_result": result}
 
@@ -42,7 +48,10 @@ def social_node(state: DPRGraphState) -> Dict[str, Any]:
     return {"social_result": result}
 
 def reconcile_node(state: DPRGraphState) -> Dict[str, Any]:
-    logger.info(f"--- [LANGGRAPH STEP 3] MANAGER CONFLICT RESOLUTION & WEIGHTED SCORING (Job {state.get('job_id')}) ---")
+    job_id = state.get("job_id", "")
+    if job_id:
+        update_job_status(job_id, status="PROCESSING", current_step="Step 5/5: Manager reconciling cross-pillar contradictions & computing composite score...")
+    logger.info(f"--- [LANGGRAPH STEP 3] MANAGER CONFLICT RESOLUTION & WEIGHTED SCORING (Job {job_id}) ---")
     plan = state.get("manager_plan", {})
     tech = state.get("technical_result", {})
     fin = state.get("financial_result", {})

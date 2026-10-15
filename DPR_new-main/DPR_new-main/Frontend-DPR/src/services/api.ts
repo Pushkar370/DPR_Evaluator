@@ -81,6 +81,7 @@ export interface AnalysisReport {
   extracted_images?: Array<{ path: string; caption: string }>;
   error_message?: string | null;
   processing_time?: number | null;
+  current_step?: string | null;
 }
 
 export interface HistoryItem {
@@ -104,8 +105,8 @@ export const dprApi = {
     return res.data;
   },
 
-  checkStatus: async (jobId: string): Promise<{ job_id: string; status: string; report?: AnalysisReport }> => {
-    const res = await apiClient.get<{ job_id: string; status: string; report?: AnalysisReport }>(`/status/${jobId}`);
+  checkStatus: async (jobId: string): Promise<{ job_id: string; status: string; current_step?: string; report?: AnalysisReport }> => {
+    const res = await apiClient.get<{ job_id: string; status: string; current_step?: string; report?: AnalysisReport }>(`/status/${jobId}`);
     return res.data;
   },
 

@@ -41,20 +41,23 @@ def process_dpr_task(job_id: str, pdf_path: str):
     logger.info(f"[JOB STARTED] Processing job {job_id} ({filename})")
     
     # Record job in SQLite
-    create_job(job_id, filename, pdf_path)
+    create_job(job_id, filename, pdf_path, initial_step="Step 1/5: Extracting PDF pages & OCR verification...")
 
     try:
         # Step 1: Flexible Document Extraction (with OCR fallback)
+        update_job_status(job_id, status="PROCESSING", current_step="Step 1/5: Extracting PDF text blocks & OCR verification...")
         logger.info(f"[JOB EXTRACTING] Extracting text & images for {job_id}")
         extraction_result = extract_document_flexible(pdf_path, job_id)
         extracted_text = extraction_result["text_markdown"]
         total_pages = extraction_result.get("total_pages", 1)
         
         # Step 2: Vector Ingestion into Qdrant
+        update_job_status(job_id, status="PROCESSING", current_step="Step 2/5: Vectorizing document chunks into Qdrant & preparing embeddings...")
         logger.info(f"[JOB INGESTING] Vectorizing chunks for {job_id}")
         document_rag.ingest_document(job_id, extracted_text)
         
         # Step 3: LangGraph Multi-Agent Execution
+        update_job_status(job_id, status="PROCESSING", current_step="Step 3/5: Manager Agent analyzing Table of Contents & planning pillar directives...")
         logger.info(f"[JOB LANGGRAPH] Invoking LangGraph Multi-Agent workflow for {job_id}")
         initial_state = {
             "job_id": job_id,
@@ -86,7 +89,7 @@ def process_dpr_task(job_id: str, pdf_path: str):
     except Exception as e:
         processing_time = round(time.time() - start_time, 2)
         logger.error(f"[JOB FAILED] {job_id} failed after {processing_time}s: {e}")
-        update_job_status(job_id, status="FAILED", error_message=str(e), processing_time=processing_time)
+        update_job_status(job_id, status="FAILED", current_step="Failed", error_message=str(e), processing_time=processing_time)
 
 def process_dpr_file(job_id: str, pdf_path: str):
     """Trigger function called by FastAPI background tasks."""
@@ -103,6 +106,7 @@ def get_job_status(job_id: str) -> Optional[AnalysisReport]:
     report = AnalysisReport(
         job_id=job_id,
         status=job_data["status"],
+        current_step=job_data.get("current_step") or ("Completed" if job_data["status"] == "COMPLETED" else "Processing..."),
         overall_score=job_data.get("overall_score"),
         verdict=job_data.get("verdict"),
         executive_summary=job_data.get("executive_summary") or "",

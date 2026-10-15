@@ -108,6 +108,7 @@ async def check_status(job_id: str):
     return StatusResponse(
         job_id=job_id,
         status=report.status,
+        current_step=report.current_step,
         report=report if report.status in ["COMPLETED", "FAILED"] else None
     )
 

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  Box, Container, Typography, Grid, Card, CardContent, Button, Alert, CircularProgress, Chip, LinearProgress, Stack
+  Box, Container, Typography, Grid, Card, CardContent, Button, Alert, CircularProgress, Chip, LinearProgress, Stack,
+  Stepper, Step, StepLabel, StepContent, Paper
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
@@ -11,12 +12,74 @@ import {
   NaturePeople as SocialIcon,
   Warning as ConflictIcon,
   CheckCircle as PassIcon,
-  ErrorOutline as RiskIcon
+  ErrorOutline as RiskIcon,
+  Check as CheckIcon,
+  Article as DocIcon,
+  Storage as StorageIcon,
+  Psychology as BrainIcon,
+  Hub as HubIcon,
+  Balance as BalanceIcon,
+  Timer as TimerIcon
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { dprApi, AnalysisReport, PillarScorecard, ConflictItem, FindingItem } from '../../services/api';
+
+const PIPELINE_STAGES = [
+  {
+    label: 'Stage 1: Document Ingestion & Vision OCR',
+    subtitle: 'PyMuPDF text blocks & scanned page detection',
+    details: 'Extracts verbatim page blocks, checks character density, and triggers Gemini Vision OCR for scanned or image-based pages.',
+    icon: <DocIcon sx={{ fontSize: 18 }} />,
+    subitems: [
+      { emoji: '📄', title: 'High-Fidelity Extraction', desc: 'PyMuPDF page-by-page text & layout tagging' },
+      { emoji: '👁️', title: 'Vision OCR Fallback', desc: 'Automatic image OCR for scanned submissions' }
+    ]
+  },
+  {
+    label: 'Stage 2: Vector Embedding & Ingestion',
+    subtitle: 'Local Sentence-Transformers & Qdrant indexing',
+    details: 'Generates 384-dimensional dense vectors and indexes chunks into local Qdrant tagged with job ID and exact page citations.',
+    icon: <StorageIcon sx={{ fontSize: 18 }} />,
+    subitems: [
+      { emoji: '🧩', title: 'Semantic Chunking', desc: 'Preserves clause context with page headers' },
+      { emoji: '⚡', title: 'Qdrant Ingestion', desc: 'Indexed into dpr_documents collection' }
+    ]
+  },
+  {
+    label: 'Stage 3: Manager Agent Strategic Planning',
+    subtitle: 'Table of Contents & Executive Summary analysis',
+    details: 'Manager reviews high-level project scope and assigns tailored audit directives and focus weights across all 4 pillars.',
+    icon: <BrainIcon sx={{ fontSize: 18 }} />,
+    subitems: [
+      { emoji: '📑', title: 'TOC & Scope Analysis', desc: 'Identifies infrastructure type and sector norms' },
+      { emoji: '🎯', title: 'Pillar Directives', desc: 'Directs focus per pillar before parallel fan-out' }
+    ]
+  },
+  {
+    label: 'Stage 4: 4-Pillar Parallel Fan-Out Assessment',
+    subtitle: 'Technical, Financial, Admin & Social Agents',
+    details: 'Agents query up to 15 relevant DPR chunks + MDoNER guidelines in parallel and extract page-cited findings.',
+    icon: <HubIcon sx={{ fontSize: 18 }} />,
+    subitems: [
+      { emoji: '🏗️', title: 'Technical (30%)', desc: 'Structural feasibility, BoQ & IRC standards' },
+      { emoji: '💰', title: 'Financial (30%)', desc: 'Schedule of Rates & contingency cap (3%/8%)' },
+      { emoji: '🏛️', title: 'Admin (20%)', desc: '100% land encumbrance & statutory clearances' },
+      { emoji: '🌿', title: 'Social & Env (20%)', desc: 'EIA/SIA clearances, tribal rights & EMP' }
+    ]
+  },
+  {
+    label: 'Stage 5: Conflict Reconciliation & Composite Verdict',
+    subtitle: 'Cross-pillar contradictions & SLEC scoring',
+    details: 'Manager cross-references pillar scorecards, resolves timeline or cost contradictions, and computes official verdict.',
+    icon: <BalanceIcon sx={{ fontSize: 18 }} />,
+    subitems: [
+      { emoji: '⚖️', title: 'Conflict Resolution', desc: 'Reconciles conflicting tenders, costs & dates' },
+      { emoji: '🏆', title: 'Official Verdict', desc: 'Weighted score & Approve / Revise / Reject' }
+    ]
+  }
+];
 
 export const AnalysisDashboard: React.FC = () => {
   const location = useLocation();
@@ -27,6 +90,8 @@ export const AnalysisDashboard: React.FC = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentStepText, setCurrentStepText] = useState<string>('Step 1/5: Extracting PDF pages & OCR verification...');
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
   // Load a historic report or incoming jobId passed via React Router state
   useEffect(() => {
@@ -68,12 +133,27 @@ export const AnalysisDashboard: React.FC = () => {
     }
   };
 
+  // Real-time elapsed timer
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval>;
+    if (activeStep === 'processing') {
+      setElapsedSeconds(0);
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [activeStep]);
+
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (activeStep === 'processing' && jobId) {
       interval = setInterval(async () => {
         try {
           const data = await dprApi.checkStatus(jobId);
+          if (data.current_step) {
+            setCurrentStepText(data.current_step);
+          }
           if (data.status === 'COMPLETED' && data.report) {
             setReport(data.report);
             setActiveStep('results');
@@ -86,10 +166,27 @@ export const AnalysisDashboard: React.FC = () => {
         } catch (err: any) {
           console.error('Polling error:', err);
         }
-      }, 3000);
+      }, 1500);
     }
     return () => clearInterval(interval);
   }, [activeStep, jobId]);
+
+  const getActiveStepIndex = () => {
+    if (currentStepText.includes('1/5') || currentStepText.includes('Extracting')) return 0;
+    if (currentStepText.includes('2/5') || currentStepText.includes('Vectorizing')) return 1;
+    if (currentStepText.includes('3/5') || currentStepText.includes('planning') || currentStepText.includes('analyzing')) return 2;
+    if (currentStepText.includes('4/5') || currentStepText.includes('parallel') || currentStepText.includes('Pillar Agents')) return 3;
+    if (currentStepText.includes('5/5') || currentStepText.includes('reconciling') || currentStepText.includes('scoring')) return 4;
+    
+    // Smooth time-based progression fallback
+    if (elapsedSeconds < 2) return 0;
+    if (elapsedSeconds < 5) return 1;
+    if (elapsedSeconds < 8) return 2;
+    if (elapsedSeconds < 14) return 3;
+    return 4;
+  };
+
+  const activeStepIndex = getActiveStepIndex();
 
   const overallScore = report?.overall_score != null ? Math.round(report.overall_score) : null;
   const verdict = report?.verdict || report?.evaluation_summary?.approval_status || 'Pending';
@@ -179,21 +276,187 @@ export const AnalysisDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* STEP 2: PROCESSING */}
+      {/* STEP 2: PROCESSING - LIVE MULTI-AGENT STEPPER */}
       {activeStep === 'processing' && (
-        <Card sx={{ maxWidth: 700, mx: 'auto', p: 5, textAlign: 'center', borderRadius: 3 }}>
-          <CircularProgress size={70} sx={{ color: '#0f2c59', mb: 3 }} />
-          <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f2c59', mb: 1 }}>
-            LangGraph Multi-Agent System Evaluating DPR...
-          </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            Technical, Financial, Administrative, and Social Agents are querying document chunks and NE-SIDS guidelines in parallel.
-          </Typography>
-          <LinearProgress sx={{ borderRadius: 2, height: 8, bgcolor: '#e0e7ff', '& .MuiLinearProgress-bar': { bgcolor: '#0f2c59' } }} />
-          <Box sx={{ display: 'flex', justifyContent: 'space-around', mt: 3, color: 'text.secondary', fontSize: '0.85rem' }}>
-            <span>🔍 1. PDF & OCR Extraction</span>
-            <span>⚡ 2. Parallel Pillar Agents</span>
-            <span>⚖️ 3. Manager Reconciliation</span>
+        <Card sx={{ maxWidth: 880, mx: 'auto', p: 4, borderRadius: 3, boxShadow: '0 8px 32px rgba(15, 44, 89, 0.08)' }}>
+          {/* Header with live pulsing badge */}
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, pb: 2, borderBottom: '1px solid #eef2f6' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  bgcolor: '#ff9933',
+                  boxShadow: '0 0 0 4px rgba(255, 153, 51, 0.25)'
+                }}
+              />
+              <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f2c59' }}>
+                Multi-Agent DPR Evaluation Pipeline
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              {jobId && (
+                <Chip
+                  label={`Job ID: #${jobId}`}
+                  variant="outlined"
+                  size="small"
+                  sx={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f2c59' }}
+                />
+              )}
+              <Chip
+                icon={<TimerIcon sx={{ fontSize: 16 }} />}
+                label={`${elapsedSeconds}s elapsed`}
+                size="small"
+                color="primary"
+                sx={{ fontWeight: 600 }}
+              />
+            </Stack>
+          </Box>
+
+          {/* Active status banner */}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              mb: 3,
+              borderRadius: 2,
+              bgcolor: '#f0f7ff',
+              border: '1px solid #cce3fe',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2
+            }}
+          >
+            <CircularProgress size={24} sx={{ color: '#1976d2' }} />
+            <Box sx={{ flexGrow: 1 }}>
+              <Typography variant="caption" sx={{ color: '#1976d2', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}>
+                Active Evaluation Stage
+              </Typography>
+              <Typography variant="body1" sx={{ fontWeight: 600, color: '#0f2c59' }}>
+                {currentStepText}
+              </Typography>
+            </Box>
+          </Paper>
+
+          {/* Progress bar */}
+          <Box sx={{ mb: 4 }}>
+            <LinearProgress
+              variant="determinate"
+              value={Math.min(100, Math.max(12, ((activeStepIndex + 1) / 5) * 100))}
+              sx={{
+                height: 8,
+                borderRadius: 4,
+                bgcolor: '#e2e8f0',
+                '& .MuiLinearProgress-bar': {
+                  background: 'linear-gradient(90deg, #0f2c59 0%, #1976d2 50%, #ff9933 100%)',
+                  borderRadius: 4
+                }
+              }}
+            />
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Stage {activeStepIndex + 1} of 5 Active
+              </Typography>
+              <Typography variant="caption" sx={{ fontWeight: 600, color: '#0f2c59' }}>
+                {Math.round(Math.min(100, Math.max(12, ((activeStepIndex + 1) / 5) * 100)))}% Complete
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Stepper with 5 detailed pipeline stages */}
+          <Stepper activeStep={activeStepIndex} orientation="vertical">
+            {PIPELINE_STAGES.map((stage, idx) => {
+              const isPast = idx < activeStepIndex;
+              const isCurrent = idx === activeStepIndex;
+              return (
+                <Step key={stage.label} active={isCurrent} completed={isPast}>
+                  <StepLabel
+                    StepIconComponent={() => (
+                      <Box
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          bgcolor: isPast ? '#2e7d32' : isCurrent ? '#0f2c59' : '#f1f5f9',
+                          color: isPast || isCurrent ? '#fff' : '#94a3b8',
+                          boxShadow: isCurrent ? '0 0 0 4px rgba(15, 44, 89, 0.2)' : 'none',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        {isPast ? <CheckIcon sx={{ fontSize: 18 }} /> : stage.icon}
+                      </Box>
+                    )}
+                  >
+                    <Box sx={{ ml: 1 }}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography
+                          variant="subtitle1"
+                          sx={{
+                            fontWeight: isCurrent ? 700 : isPast ? 600 : 500,
+                            color: isCurrent ? '#0f2c59' : isPast ? '#2e7d32' : 'text.secondary'
+                          }}
+                        >
+                          {stage.label}
+                        </Typography>
+                        {isCurrent && (
+                          <Chip label="In Progress" size="small" color="primary" sx={{ height: 20, fontSize: '0.7rem' }} />
+                        )}
+                        {isPast && (
+                          <Chip label="Completed" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
+                        )}
+                      </Stack>
+                      <Typography variant="caption" sx={{ color: isCurrent ? 'text.primary' : 'text.secondary', display: 'block', mt: 0.3 }}>
+                        {stage.details}
+                      </Typography>
+                    </Box>
+                  </StepLabel>
+                  <StepContent>
+                    {stage.subitems && (
+                      <Box sx={{ pl: 2, pt: 1, pb: 1 }}>
+                        <Grid container spacing={1}>
+                          {stage.subitems.map((sub, sIdx) => (
+                            <Grid item xs={12} sm={6} key={sIdx}>
+                              <Box
+                                sx={{
+                                  p: 1.2,
+                                  borderRadius: 1.5,
+                                  bgcolor: isCurrent ? '#f8fafc' : '#fdfdfe',
+                                  border: '1px solid #e2e8f0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 1
+                                }}
+                              >
+                                <Box sx={{ fontSize: 16 }}>{sub.emoji}</Box>
+                                <Box>
+                                  <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', color: '#1e293b' }}>
+                                    {sub.title}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.72rem' }}>
+                                    {sub.desc}
+                                  </Typography>
+                                </Box>
+                              </Box>
+                            </Grid>
+                          ))}
+                        </Grid>
+                      </Box>
+                    )}
+                  </StepContent>
+                </Step>
+              );
+            })}
+          </Stepper>
+
+          {/* Footer note */}
+          <Box sx={{ mt: 4, pt: 2, borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">
+              🔒 All evaluations cite verbatim DPR pages against official MDoNER & NE-SIDS statutory guidelines.
+            </Typography>
           </Box>
         </Card>
       )}

@@ -80,6 +80,7 @@ class AnalysisReport(BaseModel):
     error_message: Optional[str] = Field(default=None, description="Error details if status is FAILED")
     ocr_text: Optional[str] = Field(default=None, description="Raw extracted text (optional)")
     processing_time: Optional[float] = Field(default=None, description="Time taken to process in seconds")
+    current_step: Optional[str] = Field(default=None, description="Current evaluation pipeline stage")
 
 
 class UploadResponse(BaseModel):
@@ -90,6 +91,7 @@ class UploadResponse(BaseModel):
 class StatusResponse(BaseModel):
     job_id: str = Field(..., description="Job ID")
     status: str = Field(..., description="Current job status")
+    current_step: Optional[str] = Field(default=None, description="Active pipeline stage description")
     report: Optional[AnalysisReport] = Field(default=None, description="Full analysis report if completed")
 
 
