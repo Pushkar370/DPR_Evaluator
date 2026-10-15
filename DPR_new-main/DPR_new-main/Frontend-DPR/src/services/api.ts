@@ -102,6 +102,7 @@ export interface GeospatialVerificationReport {
   has_overlap_conflict: boolean;
   overlap_area_acres: number;
   overlap_percentage: number;
+  overlap_boundary?: [number, number][];
   seismic_zone: string;
   water_body_status: string;
   forest_clearance_status: string;

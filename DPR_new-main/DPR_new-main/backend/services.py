@@ -1,7 +1,8 @@
 import os
 import time
+import math
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from backend.config import settings
 from backend.schemas import (
@@ -293,16 +294,137 @@ STATE_COORDINATES = {
     "thiruvananthapuram": (8.5241, 76.9366),
 }
 
+def latlng_to_meters(lat: float, lng: float, ref_lat: float, ref_lng: float) -> Tuple[float, float]:
+    R = 6371000.0
+    rad = math.pi / 180.0
+    x = (lng - ref_lng) * rad * R * math.cos(ref_lat * rad)
+    y = (lat - ref_lat) * rad * R
+    return x, y
+
+def meters_to_latlng(x: float, y: float, ref_lat: float, ref_lng: float) -> Tuple[float, float]:
+    R = 6371000.0
+    rad = math.pi / 180.0
+    lat = ref_lat + (y / R) / rad
+    cos_lat = math.cos(ref_lat * rad)
+    lng = ref_lng + (x / (R * (cos_lat if abs(cos_lat) > 1e-6 else 1.0))) / rad
+    return lat, lng
+
+def polygon_area_sqm(pts: List[List[float]]) -> float:
+    if len(pts) < 3:
+        return 0.0
+    area = 0.0
+    n = len(pts)
+    for i in range(n):
+        j = (i + 1) % n
+        area += pts[i][0] * pts[j][1]
+        area -= pts[j][0] * pts[i][1]
+    return abs(area) / 2.0
+
+def clip_polygon(subject_polygon: List[List[float]], clip_polygon_pts: List[List[float]]) -> List[List[float]]:
+    """Sutherland-Hodgman polygon clipping algorithm."""
+    def inside(p, cp1, cp2):
+        return (cp2[0] - cp1[0]) * (p[1] - cp1[1]) >= (cp2[1] - cp1[1]) * (p[0] - cp1[0])
+
+    def intersection(cp1, cp2, s, e):
+        dc = [cp1[0] - cp2[0], cp1[1] - cp2[1]]
+        dp = [s[0] - e[0], s[1] - e[1]]
+        n1 = cp1[0] * cp2[1] - cp1[1] * cp2[0]
+        n2 = s[0] * e[1] - s[1] * e[0]
+        denom = dc[0] * dp[1] - dc[1] * dp[0]
+        if abs(denom) < 1e-9:
+            return s
+        n3 = 1.0 / denom
+        return [(n1 * dp[0] - n2 * dc[0]) * n3, (n1 * dp[1] - n2 * dc[1]) * n3]
+
+    output_list = [p for p in subject_polygon]
+    if not output_list:
+        return []
+    if len(output_list) > 2 and output_list[0] == output_list[-1]:
+        output_list.pop()
+
+    cp_pts = [p for p in clip_polygon_pts]
+    if len(cp_pts) > 2 and cp_pts[0] == cp_pts[-1]:
+        cp_pts.pop()
+
+    area = 0.0
+    for i in range(len(cp_pts)):
+        j = (i + 1) % len(cp_pts)
+        area += cp_pts[i][0] * cp_pts[j][1] - cp_pts[j][0] * cp_pts[i][1]
+    if area < 0:
+        cp_pts.reverse()
+
+    for i in range(len(cp_pts)):
+        cp1 = cp_pts[i]
+        cp2 = cp_pts[(i + 1) % len(cp_pts)]
+        input_list = output_list
+        output_list = []
+        if not input_list:
+            break
+        s = input_list[-1]
+        for e in input_list:
+            if inside(e, cp1, cp2):
+                if not inside(s, cp1, cp2):
+                    output_list.append(intersection(cp1, cp2, s, e))
+                output_list.append(e)
+            elif inside(s, cp1, cp2):
+                output_list.append(intersection(cp1, cp2, s, e))
+            s = e
+    return output_list
+
+def compute_geospatial_overlap(
+    project_boundary: List[List[float]],
+    restricted_boundary: List[List[float]],
+    ref_lat: float,
+    ref_lng: float
+) -> Tuple[float, float, float, List[List[float]]]:
+    """
+    Computes mathematically rigorous GIS metrics:
+    - site_area_acres
+    - overlap_area_acres
+    - overlap_percentage
+    - overlap_boundary vertices (closed polygon)
+    """
+    if not project_boundary or len(project_boundary) < 3:
+        return 15.0, 0.0, 0.0, []
+
+    p_clean = project_boundary[:-1] if project_boundary[0] == project_boundary[-1] else project_boundary
+    r_clean = restricted_boundary[:-1] if restricted_boundary and restricted_boundary[0] == restricted_boundary[-1] else restricted_boundary
+
+    pts1 = [list(latlng_to_meters(p[0], p[1], ref_lat, ref_lng)) for p in p_clean]
+    site_area_sqm = polygon_area_sqm(pts1)
+    site_area_acres = round(site_area_sqm / 4046.8564, 1)
+
+    if not r_clean or len(r_clean) < 3:
+        return max(site_area_acres, 1.0), 0.0, 0.0, []
+
+    pts2 = [list(latlng_to_meters(p[0], p[1], ref_lat, ref_lng)) for p in r_clean]
+    clipped_pts = clip_polygon(pts1, pts2)
+    inter_area_sqm = polygon_area_sqm(clipped_pts)
+    overlap_acres = round(inter_area_sqm / 4046.8564, 1)
+
+    if overlap_acres > 0.05 and len(clipped_pts) >= 3:
+        overlap_boundary = []
+        for pt in clipped_pts:
+            lat, lng = meters_to_latlng(pt[0], pt[1], ref_lat, ref_lng)
+            overlap_boundary.append([round(lat, 5), round(lng, 5)])
+        # Close polygon
+        if overlap_boundary[0] != overlap_boundary[-1]:
+            overlap_boundary.append(overlap_boundary[0])
+        
+        pct = round(min(100.0, (overlap_acres / site_area_acres) * 100), 1) if site_area_acres > 0 else 0.0
+        return max(site_area_acres, 1.0), overlap_acres, pct, overlap_boundary
+
+    return max(site_area_acres, 1.0), 0.0, 0.0, []
+
 def reconcile_geospatial_coordinates(report: GeospatialVerificationReport, filename: str, summary: str) -> GeospatialVerificationReport:
     """
-    Ensures that report.lat and report.lng reflect genuine site coordinates
-    instead of defaulting to Guwahati (26.1445, 91.7362), and aligns project/restricted boundaries.
+    Ensures that report.lat and report.lng reflect genuine site coordinates,
+    computes exact mathematical overlap metrics between boundaries, and aligns report stats.
     """
     # 1. If project boundary exists, compute centroid
     if report.project_boundary and len(report.project_boundary) >= 3:
         avg_lat = sum(p[0] for p in report.project_boundary) / len(report.project_boundary)
         avg_lng = sum(p[1] for p in report.project_boundary) / len(report.project_boundary)
-        # If lat/lng was left at default (26.1445, 91.7362) or differs significantly from boundary centroid
         if abs(report.lat - avg_lat) > 0.1 or (abs(report.lat - 26.1445) < 0.001 and abs(report.lng - 91.7362) < 0.001 and report.state.lower() != "assam"):
             report.lat = round(avg_lat, 4)
             report.lng = round(avg_lng, 4)
@@ -324,45 +446,84 @@ def reconcile_geospatial_coordinates(report: GeospatialVerificationReport, filen
     if report.place_name in ["Project Site", ""] and report.district and report.state:
         report.place_name = f"{report.district}, {report.state}"
 
-    # 4. If project_boundary is empty or invalid, construct realistic polygon around center
+    # 4. If project_boundary is empty or invalid, construct realistic polygon (~25 acres)
     if not report.project_boundary or len(report.project_boundary) < 3:
         lat, lng = report.lat, report.lng
         report.project_boundary = [
-            [round(lat + 0.0050, 4), round(lng - 0.0040, 4)],
-            [round(lat + 0.0120, 4), round(lng + 0.0060, 4)],
-            [round(lat + 0.0070, 4), round(lng + 0.0130, 4)],
-            [round(lat - 0.0030, 4), round(lng + 0.0030, 4)],
-            [round(lat + 0.0050, 4), round(lng - 0.0040, 4)]
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)],
+            [round(lat + 0.0012, 5), round(lng - 0.0022, 5)],
+            [round(lat + 0.0020, 5), round(lng + 0.0020, 5)],
+            [round(lat - 0.0010, 5), round(lng + 0.0022, 5)],
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)]
         ]
 
     # 5. If restricted_zone_boundary is empty or invalid, construct realistic buffer polygon
     if not report.restricted_zone_boundary or len(report.restricted_zone_boundary) < 3:
         lat, lng = report.lat, report.lng
         report.restricted_zone_boundary = [
-            [round(lat + 0.0070, 4), round(lng + 0.0010, 4)],
-            [round(lat + 0.0170, 4), round(lng + 0.0110, 4)],
-            [round(lat + 0.0120, 4), round(lng + 0.0210, 4)],
-            [round(lat + 0.0020, 4), round(lng + 0.0110, 4)],
-            [round(lat + 0.0070, 4), round(lng + 0.0010, 4)]
+            [round(lat + 0.0005, 5), round(lng + 0.0002, 5)],
+            [round(lat + 0.0035, 5), round(lng + 0.0005, 5)],
+            [round(lat + 0.0030, 5), round(lng + 0.0040, 5)],
+            [round(lat - 0.0020, 5), round(lng + 0.0035, 5)],
+            [round(lat + 0.0005, 5), round(lng + 0.0002, 5)]
         ]
 
-    # 6. Ensure key_findings has page-cited findings if empty
+    # 6. Mathematically compute exact site area, overlap acreage, and overlap percentage
+    site_acres, overlap_acres, overlap_pct, overlap_poly = compute_geospatial_overlap(
+        report.project_boundary,
+        report.restricted_zone_boundary,
+        report.lat,
+        report.lng
+    )
+    report.site_area_acres = site_acres
+    report.overlap_area_acres = overlap_acres
+    report.overlap_percentage = overlap_pct
+    report.overlap_boundary = overlap_poly
+    report.has_overlap_conflict = (overlap_acres > 0.05)
+
+    if report.has_overlap_conflict:
+        report.compliance_status = "REQUIRES_REVIEW"
+    else:
+        report.compliance_status = "COMPLIANT"
+
+    # 7. Ensure key_findings has page-cited findings if empty
     if not report.key_findings:
+        conflict_msg = (
+            f"Restricted zone encroachment confirmed: {report.overlap_area_acres} Acres ({report.overlap_percentage}% overlap) requires statutory clearance"
+            if report.has_overlap_conflict
+            else "Project site boundary is completely clear of statutory restricted environmental zones"
+        )
         report.key_findings = [
             f"Site situated at coordinates ({report.lat:.4f}° N, {report.lng:.4f}° E) within {report.district}, {report.state}",
-            f"Environmental clearance status: {report.forest_clearance_status}; Water body buffer: {report.water_body_status}",
-            f"Design seismic hazard: {report.seismic_zone} - Compliance verification required per MoRTH & BIS specifications"
+            conflict_msg,
+            f"Seismic hazard classification: {report.seismic_zone} - Strict structural ductility requirements apply"
         ]
 
     return report
 
 def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> GeospatialVerificationReport:
-    """Deterministic fallback coordinates when LLM pool is unavailable."""
+    """Deterministic fallback coordinates and boundaries when LLM pool is unavailable."""
     combined = f"{filename} {summary}".lower()
     
     if "yamuna" in combined or "delhi" in combined or "bridge" in combined:
         lat, lng = 28.6139, 77.2090
-        return GeospatialVerificationReport(
+        # Project boundary (~35.7 acres)
+        p_boundary = [
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)],
+            [round(lat + 0.0012, 5), round(lng - 0.0022, 5)],
+            [round(lat + 0.0020, 5), round(lng + 0.0020, 5)],
+            [round(lat - 0.0010, 5), round(lng + 0.0022, 5)],
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)]
+        ]
+        # Yamuna Floodplain buffer overlapping eastern piers
+        r_boundary = [
+            [round(lat + 0.0005, 5), round(lng + 0.0002, 5)],
+            [round(lat + 0.0035, 5), round(lng + 0.0005, 5)],
+            [round(lat + 0.0030, 5), round(lng + 0.0040, 5)],
+            [round(lat - 0.0020, 5), round(lng + 0.0035, 5)],
+            [round(lat + 0.0005, 5), round(lng + 0.0002, 5)]
+        ]
+        report = GeospatialVerificationReport(
             job_id=job_id,
             project_title="4-Lane Bridge Construction over River Yamuna",
             place_name="Yamuna River Corridor, Delhi",
@@ -372,38 +533,37 @@ def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> G
             lng=lng,
             zoom_level=14,
             project_type="Bridge & Urban Corridor",
-            site_area_acres=14.8,
-            project_boundary=[
-                [lat + 0.0050, lng - 0.0040],
-                [lat + 0.0120, lng + 0.0060],
-                [lat + 0.0070, lng + 0.0130],
-                [lat - 0.0030, lng + 0.0030],
-                [lat + 0.0050, lng - 0.0040]
-            ],
+            project_boundary=p_boundary,
             restricted_zone_name="Yamuna Floodplain Eco-Sensitive Zone",
             restricted_zone_type="River Floodplain & Ecological Buffer",
-            restricted_zone_boundary=[
-                [lat + 0.0070, lng + 0.0010],
-                [lat + 0.0170, lng + 0.0110],
-                [lat + 0.0120, lng + 0.0210],
-                [lat + 0.0020, lng + 0.0110],
-                [lat + 0.0070, lng + 0.0010]
-            ],
-            has_overlap_conflict=True,
-            overlap_area_acres=2.1,
-            overlap_percentage=14.2,
+            restricted_zone_boundary=r_boundary,
             seismic_zone="Zone IV (Severe Intensity)",
             water_body_status="Within 50m of River Yamuna; CRZ clearance & NGT guidelines mandatory",
             forest_clearance_status="Stage-I In-Principle Clearance required for riverbank approaches",
-            compliance_status="REQUIRES_REVIEW",
             key_findings=[
-                "Pier foundations located in Yamuna active floodplain require NGT environmental clearance (DPR Page 1)",
-                "Scour depth and hydraulic design must adhere strictly to IRC:78-2014 and CWPRS recommendations (DPR Page 1)"
+                "Bridge pier foundations located in Yamuna active floodplain require mandatory NGT clearance (DPR Page 1)",
+                "Scour depth and hydraulic design must adhere strictly to IRC:78-2014 CWPRS guidelines (DPR Page 1)"
             ]
         )
+        return reconcile_geospatial_coordinates(report, filename, summary)
+
     elif "jammu" in combined or "kashmir" in combined or "244" in combined or "kishtwar" in combined or "material" in combined:
         lat, lng = 33.3129, 75.7661
-        return GeospatialVerificationReport(
+        p_boundary = [
+            [round(lat - 0.0022, 5), round(lng - 0.0030, 5)],
+            [round(lat + 0.0016, 5), round(lng - 0.0025, 5)],
+            [round(lat + 0.0024, 5), round(lng + 0.0025, 5)],
+            [round(lat - 0.0014, 5), round(lng + 0.0028, 5)],
+            [round(lat - 0.0022, 5), round(lng - 0.0030, 5)]
+        ]
+        r_boundary = [
+            [round(lat + 0.0003, 5), round(lng + 0.0006, 5)],
+            [round(lat + 0.0038, 5), round(lng + 0.0010, 5)],
+            [round(lat + 0.0032, 5), round(lng + 0.0045, 5)],
+            [round(lat - 0.0018, 5), round(lng + 0.0038, 5)],
+            [round(lat + 0.0003, 5), round(lng + 0.0006, 5)]
+        ]
+        report = GeospatialVerificationReport(
             job_id=job_id,
             project_title="NH-244 Two-Lane Highway & Tunnel Pre-Construction Alignment",
             place_name="Kishtwar - Batote Mountain Corridor, NH-244",
@@ -413,38 +573,38 @@ def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> G
             lng=lng,
             zoom_level=13,
             project_type="Highway & Mountain Tunnel",
-            site_area_acres=42.5,
-            project_boundary=[
-                [lat + 0.0060, lng - 0.0050],
-                [lat + 0.0140, lng + 0.0070],
-                [lat + 0.0090, lng + 0.0150],
-                [lat - 0.0040, lng + 0.0040],
-                [lat + 0.0060, lng - 0.0050]
-            ],
+            project_boundary=p_boundary,
             restricted_zone_name="Kishtwar High Altitude Forest Reserve",
             restricted_zone_type="Reserved Forest & Wildlife Corridor",
-            restricted_zone_boundary=[
-                [lat + 0.0080, lng + 0.0030],
-                [lat + 0.0190, lng + 0.0140],
-                [lat + 0.0120, lng + 0.0240],
-                [lat + 0.0030, lng + 0.0130],
-                [lat + 0.0080, lng + 0.0030]
-            ],
-            has_overlap_conflict=True,
-            overlap_area_acres=5.4,
-            overlap_percentage=12.7,
+            restricted_zone_boundary=r_boundary,
             seismic_zone="Zone V (Very High Damage Risk)",
             water_body_status="Parallels Chenab River drainage; 30m slope training buffer required",
-            forest_clearance_status="Stage-II Forest diversion certificate pending for 5.4 ha forest land",
-            compliance_status="REQUIRES_REVIEW",
+            forest_clearance_status="Stage-II Forest diversion certificate pending for forest land",
             key_findings=[
                 "Alignment traverses steep unstable terrain in Seismic Zone V requiring IRC:SP:48 stabilization (DPR Page 2)",
-                "Forest clearance pending for 5.4 ha mountain forest diversion in Kishtwar division (DPR Page 3)"
+                "Forest clearance pending for mountain forest diversion in Kishtwar division (DPR Page 3)"
             ]
         )
+        return reconcile_geospatial_coordinates(report, filename, summary)
+
     elif "meghalaya" in combined or "shillong" in combined or "khasi" in combined:
         lat, lng = 25.5788, 91.8933
-        return GeospatialVerificationReport(
+        p_boundary = [
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)],
+            [round(lat + 0.0015, 5), round(lng - 0.0020, 5)],
+            [round(lat + 0.0018, 5), round(lng + 0.0010, 5)],
+            [round(lat - 0.0012, 5), round(lng + 0.0012, 5)],
+            [round(lat - 0.0018, 5), round(lng - 0.0025, 5)]
+        ]
+        # Non-overlapping restricted sacred grove located 600m to the northeast
+        r_boundary = [
+            [round(lat + 0.0035, 5), round(lng + 0.0025, 5)],
+            [round(lat + 0.0065, 5), round(lng + 0.0030, 5)],
+            [round(lat + 0.0060, 5), round(lng + 0.0060, 5)],
+            [round(lat + 0.0030, 5), round(lng + 0.0055, 5)],
+            [round(lat + 0.0035, 5), round(lng + 0.0025, 5)]
+        ]
+        report = GeospatialVerificationReport(
             job_id=job_id,
             project_title="East Khasi Hills Road & Connectivity Upgrade",
             place_name="Shillong Corridor, East Khasi Hills",
@@ -454,35 +614,20 @@ def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> G
             lng=lng,
             zoom_level=13,
             project_type="Hill Highway & Drainage",
-            site_area_acres=22.4,
-            project_boundary=[
-                [lat + 0.0050, lng - 0.0040],
-                [lat + 0.0120, lng + 0.0060],
-                [lat + 0.0070, lng + 0.0130],
-                [lat - 0.0030, lng + 0.0030],
-                [lat + 0.0050, lng - 0.0040]
-            ],
+            project_boundary=p_boundary,
             restricted_zone_name="Shillong Peak Community Forest Reserve",
             restricted_zone_type="Sacred Groves & Catchment Area",
-            restricted_zone_boundary=[
-                [lat + 0.0070, lng + 0.0010],
-                [lat + 0.0170, lng + 0.0110],
-                [lat + 0.0120, lng + 0.0210],
-                [lat + 0.0020, lng + 0.0110],
-                [lat + 0.0070, lng + 0.0010]
-            ],
-            has_overlap_conflict=False,
-            overlap_area_acres=0.0,
-            overlap_percentage=0.0,
+            restricted_zone_boundary=r_boundary,
             seismic_zone="Zone V (Very High Damage Risk)",
             water_body_status="Hill slope stormwater drainage cross-culverts required every 200m",
             forest_clearance_status="Verified - Stage I In-Principle Clear",
-            compliance_status="COMPLIANT",
             key_findings=[
                 "Hill road alignment designed outside sensitive Sacred Grove boundaries (DPR Page 4)",
                 "Severe rainfall and landslide vulnerability requires reinforced gabion retaining walls (DPR Page 6)"
             ]
         )
+        return reconcile_geospatial_coordinates(report, filename, summary)
+
     else:
         # Check if any state/city matches in the text
         matched_lat, matched_lng = 26.1445, 91.7362
@@ -498,7 +643,21 @@ def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> G
                 break
 
         lat, lng = matched_lat, matched_lng
-        return GeospatialVerificationReport(
+        p_boundary = [
+            [round(lat - 0.0016, 5), round(lng - 0.0020, 5)],
+            [round(lat + 0.0014, 5), round(lng - 0.0018, 5)],
+            [round(lat + 0.0018, 5), round(lng + 0.0018, 5)],
+            [round(lat - 0.0012, 5), round(lng + 0.0019, 5)],
+            [round(lat - 0.0016, 5), round(lng - 0.0020, 5)]
+        ]
+        r_boundary = [
+            [round(lat + 0.0004, 5), round(lng + 0.0002, 5)],
+            [round(lat + 0.0030, 5), round(lng + 0.0005, 5)],
+            [round(lat + 0.0026, 5), round(lng + 0.0032, 5)],
+            [round(lat - 0.0015, 5), round(lng + 0.0028, 5)],
+            [round(lat + 0.0004, 5), round(lng + 0.0002, 5)]
+        ]
+        report = GeospatialVerificationReport(
             job_id=job_id,
             project_title=filename.replace(".pdf", "").replace("_", " "),
             place_name=matched_place,
@@ -508,35 +667,19 @@ def _generate_fallback_geospatial(job_id: str, filename: str, summary: str) -> G
             lng=lng,
             zoom_level=13,
             project_type="Infrastructure Project",
-            site_area_acres=18.0,
-            project_boundary=[
-                [lat + 0.0035, lng - 0.0012],
-                [lat + 0.0105, lng + 0.0088],
-                [lat + 0.0055, lng + 0.0138],
-                [lat - 0.0045, lng + 0.0038],
-                [lat + 0.0035, lng - 0.0012]
-            ],
+            project_boundary=p_boundary,
             restricted_zone_name=f"{matched_state} Regional Ecological Buffer",
             restricted_zone_type="Reserved Forest Zone",
-            restricted_zone_boundary=[
-                [lat + 0.0055, lng + 0.0038],
-                [lat + 0.0155, lng + 0.0138],
-                [lat + 0.0105, lng + 0.0238],
-                [lat + 0.0005, lng + 0.0138],
-                [lat + 0.0055, lng + 0.0038]
-            ],
-            has_overlap_conflict=True,
-            overlap_area_acres=1.8,
-            overlap_percentage=10.0,
+            restricted_zone_boundary=r_boundary,
             seismic_zone="Zone V (Very High Damage Risk)",
             water_body_status="Clear of 50m perennial river buffer",
             forest_clearance_status="MDoNER / State Forest Clearance required",
-            compliance_status="REQUIRES_REVIEW",
             key_findings=[
                 "Site boundary buffer verification completed for planned right-of-way",
                 "High seismic vulnerability requires ductile structural design detailing"
             ]
         )
+        return reconcile_geospatial_coordinates(report, filename, summary)
 
 def get_or_generate_geospatial_report(job_id: str) -> Optional[GeospatialVerificationReport]:
     """
@@ -577,7 +720,7 @@ def get_or_generate_geospatial_report(job_id: str) -> Optional[GeospatialVerific
             primary_provider="gemini"
         )
         report.job_id = job_id
-        # Reconcile centroid and coordinates
+        # Reconcile centroid, boundaries, and compute exact GIS overlap
         report = reconcile_geospatial_coordinates(report, filename, summary)
         save_geospatial_data(job_id, report.model_dump())
         return report

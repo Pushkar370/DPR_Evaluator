@@ -118,13 +118,21 @@ const GeospatialVerification: React.FC = () => {
         setSelectedJobId(event.target.value);
     };
 
-    const runAnalysis = () => {
+    const runAnalysis = async () => {
+        if (!selectedJobId) return;
         setAnalyzing(true);
         setAnalysisComplete(false);
-        setTimeout(() => {
-            setAnalyzing(false);
-            setAnalysisComplete(true);
-        }, 1200);
+        try {
+            const report = await dprApi.getGeospatialReport(selectedJobId);
+            setGeoReport(report);
+        } catch (err: any) {
+            console.error('Failed to rerun geospatial verification:', err);
+        } finally {
+            setTimeout(() => {
+                setAnalyzing(false);
+                setAnalysisComplete(true);
+            }, 600);
+        }
     };
 
     const center: [number, number] = geoReport ? [geoReport.lat, geoReport.lng] : [26.1445, 91.7362];
@@ -328,6 +336,34 @@ const GeospatialVerification: React.FC = () => {
                                         </Popup>
                                     </Polygon>
                                 </LayersControl.Overlay>
+
+                                {/* Overlap Conflict Intersection Layer */}
+                                {geoReport?.has_overlap_conflict && geoReport?.overlap_boundary && geoReport.overlap_boundary.length >= 3 && (
+                                    <LayersControl.Overlay checked name="⚠️ Encroachment Overlap Intersection">
+                                        <Polygon
+                                            pathOptions={{
+                                                color: '#ea580c',
+                                                fillColor: '#ea580c',
+                                                fillOpacity: 0.6,
+                                                weight: 3,
+                                                dashArray: '4, 4'
+                                            }}
+                                            positions={geoReport.overlap_boundary as [number, number][]}
+                                        >
+                                            <Popup>
+                                                <Typography variant="subtitle2" fontWeight="bold" color="warning.main">
+                                                    ⚠️ Statutory Encroachment Area
+                                                </Typography>
+                                                <Typography variant="body2" fontWeight="bold">
+                                                    Overlap: {geoReport.overlap_area_acres} Acres ({geoReport.overlap_percentage}%)
+                                                </Typography>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Direct physical intersection between project alignment and {geoReport.restricted_zone_name}.
+                                                </Typography>
+                                            </Popup>
+                                        </Polygon>
+                                    </LayersControl.Overlay>
+                                )}
                             </LayersControl>
 
                             {/* Project Marker */}
@@ -361,16 +397,17 @@ const GeospatialVerification: React.FC = () => {
 
                             <List dense sx={{ bgcolor: '#f8f9fa', borderRadius: 2, mb: 3 }}>
                                 <ListItem>
-                                    <ListItemIcon><ForestIcon color="success" /></ListItemIcon>
+                                    <ListItemIcon><ForestIcon color={geoReport?.has_overlap_conflict ? "error" : "success"} /></ListItemIcon>
                                     <ListItemText
-                                        primary="Forest Cover & Diversion"
-                                        secondary={geoReport?.forest_clearance_status || "Forest Survey of India"}
+                                        primary="Eco-Sensitive & Forest Zone"
+                                        secondary={geoReport?.restricted_zone_name || "Statutory Environmental Buffer"}
                                     />
                                     <Chip
-                                        label={geoReport?.has_overlap_conflict ? "Overlap" : "Clear"}
+                                        label={geoReport?.has_overlap_conflict ? `${geoReport.overlap_area_acres} Ac Overlap` : "Clear (0 Ac)"}
                                         size="small"
-                                        color={geoReport?.has_overlap_conflict ? "warning" : "success"}
+                                        color={geoReport?.has_overlap_conflict ? "error" : "success"}
                                         variant="outlined"
+                                        sx={{ fontWeight: 600 }}
                                     />
                                 </ListItem>
                                 <ListItem>
@@ -419,18 +456,18 @@ const GeospatialVerification: React.FC = () => {
                                     {geoReport.has_overlap_conflict ? (
                                         <Alert severity="warning" variant="filled" icon={<WarningIcon />}>
                                             <b>Restricted Zone Encroachment</b><br />
-                                            Proposed site overlaps with {geoReport.restricted_zone_name}.
+                                            Proposed site overlaps with {geoReport.restricted_zone_name} by <b>{geoReport.overlap_area_acres} Acres ({geoReport.overlap_percentage}%)</b>.
                                         </Alert>
                                     ) : (
                                         <Alert severity="success" variant="filled" icon={<CheckCircleIcon />}>
                                             <b>Clear of Restricted Zones</b><br />
-                                            No major environmental or forest encumbrance detected.
+                                            No environmental encroachment detected (0.0 Acres / 0.0% overlap).
                                         </Alert>
                                     )}
 
                                     <Box sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#f8fafc' }}>
-                                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f2c59', mb: 1 }}>
-                                            Site Boundary Analysis
+                                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f2c59', mb: 1.5 }}>
+                                            Site Boundary & Overlap Metrics
                                         </Typography>
                                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
                                             <Typography variant="body2" color="text.secondary">Total Project Site:</Typography>
@@ -441,13 +478,30 @@ const GeospatialVerification: React.FC = () => {
                                             <Typography
                                                 variant="body2"
                                                 fontWeight="bold"
-                                                color={geoReport.overlap_area_acres > 0 ? "error" : "success"}
+                                                color={geoReport.overlap_area_acres > 0 ? "error.main" : "success.main"}
                                             >
-                                                {geoReport.overlap_area_acres} Acres ({geoReport.overlap_percentage}%)
+                                                {geoReport.overlap_area_acres > 0
+                                                    ? `${geoReport.overlap_area_acres} Acres (${geoReport.overlap_percentage}%)`
+                                                    : "0.0 Acres (0.0% - Clear)"}
                                             </Typography>
                                         </Stack>
                                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-                                            <Typography variant="body2" color="text.secondary">Statutory Status:</Typography>
+                                            <Typography variant="body2" color="text.secondary">Unencumbered Area:</Typography>
+                                            <Typography variant="body2" fontWeight="bold" color="text.primary">
+                                                {Math.max(0, Number(((geoReport.site_area_acres || 0) - (geoReport.overlap_area_acres || 0)).toFixed(1)))} Acres
+                                            </Typography>
+                                        </Stack>
+                                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                                            <Typography variant="body2" color="text.secondary">Encroachment Status:</Typography>
+                                            <Chip
+                                                label={geoReport.has_overlap_conflict ? "CONFLICT DETECTED" : "COMPLIANT / CLEAR"}
+                                                size="small"
+                                                color={geoReport.has_overlap_conflict ? "error" : "success"}
+                                                sx={{ fontWeight: 700, fontSize: '0.7rem', height: 20 }}
+                                            />
+                                        </Stack>
+                                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                                            <Typography variant="body2" color="text.secondary">Statutory Compliance:</Typography>
                                             <Typography
                                                 variant="body2"
                                                 fontWeight="bold"

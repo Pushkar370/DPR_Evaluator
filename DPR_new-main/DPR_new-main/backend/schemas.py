@@ -142,6 +142,7 @@ class GeospatialVerificationReport(BaseModel):
     has_overlap_conflict: bool = Field(default=False, description="Whether site encroaches on restricted zone")
     overlap_area_acres: float = Field(default=0.0, description="Area of encroachment in acres")
     overlap_percentage: float = Field(default=0.0, description="Percentage of project site overlapping")
+    overlap_boundary: List[List[float]] = Field(default_factory=list, description="Array of [lat, lng] vertices forming the overlap intersection polygon")
     seismic_zone: str = Field(default="Zone V", description="Seismic hazard classification")
     water_body_status: str = Field(default="Outside 50m river buffer", description="Proximity to drainage/rivers")
     forest_clearance_status: str = Field(default="Verified - Stage I Clear", description="Forest conservation clearance")
