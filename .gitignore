@@ -5,3 +5,6 @@
 __pycache__/
 local_qdrant_data/
 node_modules/
+dist/
+uploads/
+.pytest_cache/

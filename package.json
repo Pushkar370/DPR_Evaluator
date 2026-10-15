@@ -4,8 +4,8 @@
   "private": true,
   "description": "Root workspace runner for DPR Quality Assessment System",
   "scripts": {
-    "dev": "npm --prefix DPR_new-main/DPR_new-main/Frontend-DPR run dev",
-    "build": "npm --prefix DPR_new-main/DPR_new-main/Frontend-DPR run build",
-    "lint": "npm --prefix DPR_new-main/DPR_new-main/Frontend-DPR run lint"
+    "dev": "npm --prefix Frontend-DPR run dev",
+    "build": "npm --prefix Frontend-DPR run build",
+    "lint": "npm --prefix Frontend-DPR run lint"
   }
 }
