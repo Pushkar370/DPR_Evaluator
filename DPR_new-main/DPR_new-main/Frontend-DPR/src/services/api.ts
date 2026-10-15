@@ -84,6 +84,31 @@ export interface AnalysisReport {
   current_step?: string | null;
 }
 
+export interface GeospatialVerificationReport {
+  job_id: string;
+  project_title: string;
+  place_name: string;
+  state: string;
+  district: string;
+  lat: number;
+  lng: number;
+  zoom_level: number;
+  project_type: string;
+  site_area_acres: number;
+  project_boundary: [number, number][];
+  restricted_zone_name: string;
+  restricted_zone_type: string;
+  restricted_zone_boundary: [number, number][];
+  has_overlap_conflict: boolean;
+  overlap_area_acres: number;
+  overlap_percentage: number;
+  seismic_zone: string;
+  water_body_status: string;
+  forest_clearance_status: string;
+  compliance_status: 'COMPLIANT' | 'REQUIRES_REVIEW' | 'NON_COMPLIANT' | string;
+  key_findings: string[];
+}
+
 export interface HistoryItem {
   job_id: string;
   filename: string;
@@ -127,6 +152,11 @@ export const dprApi = {
 
   getConflicts: async (jobId: string): Promise<ConflictItem[]> => {
     const res = await apiClient.get<ConflictItem[]>(`/report/${jobId}/conflicts`);
+    return res.data;
+  },
+
+  getGeospatialReport: async (jobId: string): Promise<GeospatialVerificationReport> => {
+    const res = await apiClient.get<GeospatialVerificationReport>(`/report/${jobId}/geospatial`);
     return res.data;
   },
 

@@ -122,3 +122,28 @@ class HistoryItem(BaseModel):
 
 class HistoryResponse(BaseModel):
     jobs: List[HistoryItem]
+
+
+class GeospatialVerificationReport(BaseModel):
+    job_id: str = Field(..., description="Job identifier")
+    project_title: str = Field(default="Infrastructure Project", description="Full project name")
+    place_name: str = Field(default="Project Site", description="Town, City, or Corridor name")
+    state: str = Field(default="State", description="Indian State")
+    district: str = Field(default="District", description="District name")
+    lat: float = Field(default=26.1445, description="Primary site latitude in decimal degrees (e.g. 28.6139 for Delhi, 33.3129 for J&K, 25.5788 for Meghalaya)")
+    lng: float = Field(default=91.7362, description="Primary site longitude in decimal degrees (e.g. 77.2090 for Delhi, 75.7661 for J&K, 91.8933 for Meghalaya)")
+    zoom_level: int = Field(default=13, description="Recommended map zoom level")
+    project_type: str = Field(default="Highway / Bridge", description="Infrastructure sector")
+    site_area_acres: float = Field(default=15.0, description="Estimated total area in acres")
+    project_boundary: List[List[float]] = Field(default_factory=list, description="Array of [lat, lng] vertices")
+    restricted_zone_name: str = Field(default="Restricted Environmental Zone", description="Zone designation")
+    restricted_zone_type: str = Field(default="Forest / Eco-Sensitive Zone", description="Type of restriction")
+    restricted_zone_boundary: List[List[float]] = Field(default_factory=list, description="Array of [lat, lng] vertices")
+    has_overlap_conflict: bool = Field(default=False, description="Whether site encroaches on restricted zone")
+    overlap_area_acres: float = Field(default=0.0, description="Area of encroachment in acres")
+    overlap_percentage: float = Field(default=0.0, description="Percentage of project site overlapping")
+    seismic_zone: str = Field(default="Zone V", description="Seismic hazard classification")
+    water_body_status: str = Field(default="Outside 50m river buffer", description="Proximity to drainage/rivers")
+    forest_clearance_status: str = Field(default="Verified - Stage I Clear", description="Forest conservation clearance")
+    compliance_status: str = Field(default="COMPLIANT", description="COMPLIANT, REQUIRES_REVIEW, or NON_COMPLIANT")
+    key_findings: List[str] = Field(default_factory=list, description="2-3 specific page-cited findings")

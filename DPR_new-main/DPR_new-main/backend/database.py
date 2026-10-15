@@ -40,9 +40,13 @@ def init_db(db_path: Optional[str] = None):
         );
         """)
 
-        # Migration helper for current_step column
+        # Migration helper for current_step and geospatial_json columns
         try:
             cursor.execute("ALTER TABLE jobs ADD COLUMN current_step TEXT;")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN geospatial_json TEXT;")
         except Exception:
             pass
 
@@ -302,5 +306,26 @@ def get_guideline_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         ).fetchall()
         stats = {r["pillar"]: {"documents": r["doc_count"], "pages": r["pages"] or 0, "chunks": r["chunks"] or 0} for r in rows}
         return stats
+    finally:
+        conn.close()
+
+def save_geospatial_data(job_id: str, geospatial_data: Dict[str, Any], db_path: Optional[str] = None):
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET geospatial_json = ?, updated_at = CURRENT_TIMESTAMP WHERE job_id = ?",
+                (json.dumps(geospatial_data), job_id)
+            )
+    finally:
+        conn.close()
+
+def get_geospatial_data(job_id: str, db_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT geospatial_json FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        if row and row["geospatial_json"]:
+            return json.loads(row["geospatial_json"])
+        return None
     finally:
         conn.close()

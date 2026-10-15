@@ -25,13 +25,15 @@ from backend.schemas import (
     HistoryResponse,
     HistoryItem,
     PillarScorecard,
-    ConflictItem
+    ConflictItem,
+    GeospatialVerificationReport
 )
 from backend.config import settings
 from backend.services import (
     process_dpr_file,
     get_job_status,
-    ask_chatbot
+    ask_chatbot,
+    get_or_generate_geospatial_report
 )
 from backend.database import list_jobs, get_guideline_stats
 from backend.guidelines_service import ingest_all_guidelines
@@ -155,6 +157,14 @@ async def get_job_conflicts(job_id: str):
     if report is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     return report.conflicts
+
+@app.get("/report/{job_id}/geospatial", response_model=GeospatialVerificationReport)
+async def get_job_geospatial(job_id: str):
+    """Returns geospatial coordinates, site boundary, and environmental zone analysis for a DPR."""
+    geo_report = get_or_generate_geospatial_report(job_id)
+    if geo_report is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return geo_report
 
 @app.post("/guidelines/ingest")
 async def trigger_guidelines_ingestion():

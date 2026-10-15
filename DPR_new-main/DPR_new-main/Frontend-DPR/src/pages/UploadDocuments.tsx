@@ -37,6 +37,7 @@ const UploadDocuments: React.FC = () => {
 
     try {
       const data = await dprApi.uploadDPR(selectedFile);
+      localStorage.setItem('dpr_job_id', data.job_id);
       // Redirect to Analysis page with the active jobId
       navigate('/analysis', { state: { jobId: data.job_id } });
     } catch (err: any) {

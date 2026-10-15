@@ -97,10 +97,14 @@ export const AnalysisDashboard: React.FC = () => {
   useEffect(() => {
     if (location.state && location.state.historicReport) {
       setReport(location.state.historicReport);
+      if (location.state.historicReport.job_id) {
+        localStorage.setItem('dpr_job_id', location.state.historicReport.job_id);
+      }
       setActiveStep('results');
       navigate(location.pathname, { replace: true });
     } else if (location.state && location.state.jobId) {
       setJobId(location.state.jobId);
+      localStorage.setItem('dpr_job_id', location.state.jobId);
       setActiveStep('processing');
       navigate(location.pathname, { replace: true });
     }
@@ -126,6 +130,7 @@ export const AnalysisDashboard: React.FC = () => {
 
     try {
       const uploadData = await dprApi.uploadDPR(file);
+      localStorage.setItem('dpr_job_id', uploadData.job_id);
       setJobId(uploadData.job_id);
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to upload file');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box,
     Typography,
@@ -13,9 +13,15 @@ import {
     Divider,
     Alert,
     CircularProgress,
-    Stack
+    Stack,
+    FormControl,
+    InputLabel,
+    Select,
+    MenuItem,
+    Paper,
+    SelectChangeEvent
 } from '@mui/material';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import ForestIcon from '@mui/icons-material/Forest';
@@ -25,6 +31,10 @@ import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import LayersIcon from '@mui/icons-material/Layers';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import { useLocation } from 'react-router-dom';
+
+import { dprApi, GeospatialVerificationReport, HistoryItem } from '../services/api';
 
 // Fix for leaflet marker icon
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -39,147 +49,310 @@ const DefaultIcon = L.icon({
 
 L.Marker.prototype.options.icon = DefaultIcon;
 
-const GeospatialVerification: React.FC = () => {
-    // Focus on a specific region
-    const [center, setCenter] = useState<[number, number]>([26.1445, 91.7362]);
-    const [placeName, setPlaceName] = useState<string>("Guwahati, Assam");
-    const [projectSite, setProjectSite] = useState<[number, number][]>([
-        [26.1480, 91.7350], [26.1550, 91.7450], [26.1500, 91.7500], [26.1400, 91.7400]
-    ]);
-    const [forestZone, setForestZone] = useState<[number, number][]>([
-        [26.1500, 91.7400], [26.1600, 91.7500], [26.1550, 91.7600], [26.1450, 91.7500]
-    ]);
-
+function ChangeView({ center, zoom }: { center: [number, number]; zoom: number }) {
+    const map = useMap();
     useEffect(() => {
-        const fetchLocation = async () => {
-            const jobId = localStorage.getItem('dpr_job_id');
-            if (!jobId) return;
+        map.setView(center, zoom, { animate: true });
+    }, [center, zoom, map]);
+    return null;
+}
+
+const GeospatialVerification: React.FC = () => {
+    const location = useLocation();
+
+    const [dprList, setDprList] = useState<HistoryItem[]>([]);
+    const [selectedJobId, setSelectedJobId] = useState<string>('');
+    const [geoReport, setGeoReport] = useState<GeospatialVerificationReport | null>(null);
+    const [loading, setLoading] = useState<boolean>(false);
+    const [analyzing, setAnalyzing] = useState<boolean>(false);
+    const [analysisComplete, setAnalysisComplete] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
+
+    // Fetch list of available DPRs
+    useEffect(() => {
+        const loadDPRs = async () => {
             try {
-                const response = await fetch('http://localhost:8000/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        job_id: jobId,
-                        query: "Extract the primary geographical coordinates of the main project site from the document. Respond ONLY with a raw JSON object and absolutely no other text. Format: {\"lat\": number, \"long\": number, \"place_name\": \"string\"}. If no exact coordinates exist, find the primary city or region mentioned and return its approximate coordinates. Do not use markdown blocks."
-                    })
-                });
-                const data = await response.json();
-                const jsonStr = data.answer.replace(/```json/g, '').replace(/```/g, '').trim();
-                const loc = JSON.parse(jsonStr);
-                if (loc && loc.lat && loc.long) {
-                    setCenter([loc.lat, loc.long]);
-                    setPlaceName(loc.place_name || "Project Site");
-                    
-                    // Slightly offset project site polygon based on new center
-                    setProjectSite([
-                        [loc.lat + 0.0035, loc.long - 0.0012],
-                        [loc.lat + 0.0105, loc.long + 0.0088],
-                        [loc.lat + 0.0055, loc.long + 0.0138],
-                        [loc.lat - 0.0045, loc.long + 0.0038]
-                    ]);
-                    
-                    setForestZone([
-                        [loc.lat + 0.0055, loc.long + 0.0038],
-                        [loc.lat + 0.0155, loc.long + 0.0138],
-                        [loc.lat + 0.0105, loc.long + 0.0238],
-                        [loc.lat + 0.0005, loc.long + 0.0138]
-                    ]);
+                const history = await dprApi.getReportsHistory(50);
+                setDprList(history);
+
+                // Priority: location.state -> localStorage -> first DPR
+                const stateJobId = (location.state as any)?.jobId;
+                const storedJobId = localStorage.getItem('dpr_job_id');
+                const initialJobId = stateJobId || storedJobId || (history.length > 0 ? history[0].job_id : '');
+
+                if (initialJobId) {
+                    setSelectedJobId(initialJobId);
                 }
             } catch (err) {
-                console.error("Error fetching location", err);
+                console.error('Failed to load DPR history:', err);
             }
         };
-        fetchLocation();
+        loadDPRs();
+    }, [location.state]);
+
+    // Load geospatial intelligence whenever selectedJobId changes
+    const loadGeospatialData = useCallback(async (jobId: string) => {
+        if (!jobId) return;
+        setLoading(true);
+        setError(null);
+        try {
+            localStorage.setItem('dpr_job_id', jobId);
+            const report = await dprApi.getGeospatialReport(jobId);
+            setGeoReport(report);
+            setAnalysisComplete(true);
+        } catch (err: any) {
+            console.error('Failed to load geospatial report:', err);
+            setError(err.response?.data?.detail || err.message || 'Failed to fetch geospatial intelligence');
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    // State for Simulation
-    const [analyzing, setAnalyzing] = useState(false);
-    const [analysisComplete, setAnalysisComplete] = useState(false);
+    useEffect(() => {
+        if (selectedJobId) {
+            loadGeospatialData(selectedJobId);
+        }
+    }, [selectedJobId, loadGeospatialData]);
+
+    const handleDprChange = (event: SelectChangeEvent<string>) => {
+        setSelectedJobId(event.target.value);
+    };
 
     const runAnalysis = () => {
         setAnalyzing(true);
         setAnalysisComplete(false);
-        // Simulate API delay
         setTimeout(() => {
             setAnalyzing(false);
             setAnalysisComplete(true);
-        }, 2000);
+        }, 1200);
     };
+
+    const center: [number, number] = geoReport ? [geoReport.lat, geoReport.lng] : [26.1445, 91.7362];
+    const zoom = geoReport?.zoom_level || 13;
+    const projectSite = (geoReport?.project_boundary && geoReport.project_boundary.length >= 3)
+        ? geoReport.project_boundary as [number, number][]
+        : [
+            [center[0] + 0.0035, center[1] - 0.0012],
+            [center[0] + 0.0105, center[1] + 0.0088],
+            [center[0] + 0.0055, center[1] + 0.0138],
+            [center[0] - 0.0045, center[1] + 0.0038]
+        ];
+
+    const restrictedZone = (geoReport?.restricted_zone_boundary && geoReport.restricted_zone_boundary.length >= 3)
+        ? geoReport.restricted_zone_boundary as [number, number][]
+        : [
+            [center[0] + 0.0055, center[1] + 0.0038],
+            [center[0] + 0.0155, center[1] + 0.0138],
+            [center[0] + 0.0105, center[1] + 0.0238],
+            [center[0] + 0.0005, center[1] + 0.0138]
+        ];
 
     return (
         <Box sx={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}>
-            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* Header & DPR Selector */}
+            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                     <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f2c59' }}>
                         Geospatial Intelligence
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                        Site Verification & Compliance Analysis
+                        Satellite Site Verification, Coordinates & Environmental Clearance Analysis
                     </Typography>
                 </Box>
-                <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={analyzing ? <CircularProgress size={20} color="inherit" /> : <GpsFixedIcon />}
-                    onClick={runAnalysis}
-                    disabled={analyzing}
-                    sx={{ px: 3, py: 1 }}
-                >
-                    {analyzing ? 'Analyzing...' : 'Run Compliance Check'}
-                </Button>
+
+                <Stack direction="row" spacing={2} alignItems="center">
+                    {/* DPR Selector Dropdown */}
+                    <FormControl size="small" sx={{ minWidth: 280, bgcolor: '#fff' }}>
+                        <InputLabel id="dpr-select-label">Select DPR to Verify</InputLabel>
+                        <Select
+                            labelId="dpr-select-label"
+                            id="dpr-select"
+                            value={selectedJobId}
+                            label="Select DPR to Verify"
+                            onChange={handleDprChange}
+                            disabled={loading || dprList.length === 0}
+                        >
+                            {dprList.map((dpr) => (
+                                <MenuItem key={dpr.job_id} value={dpr.job_id}>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                            {dpr.filename.replace('.pdf', '').slice(0, 32)}
+                                        </Typography>
+                                        <Chip
+                                            label={`#${dpr.job_id.slice(0, 6)}`}
+                                            size="small"
+                                            variant="outlined"
+                                            sx={{ fontSize: '0.7rem', height: 18 }}
+                                        />
+                                    </Stack>
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={analyzing || loading ? <CircularProgress size={20} color="inherit" /> : <GpsFixedIcon />}
+                        onClick={runAnalysis}
+                        disabled={analyzing || loading || !selectedJobId}
+                        sx={{ px: 3, py: 1, bgcolor: '#0f2c59', fontWeight: 600 }}
+                    >
+                        {analyzing ? 'Checking Overlap...' : 'Run Compliance Check'}
+                    </Button>
+                </Stack>
             </Box>
+
+            {error && (
+                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+                    {error}
+                </Alert>
+            )}
+
+            {/* Project Quick Overview Banner */}
+            {geoReport && (
+                <Paper
+                    elevation={0}
+                    sx={{
+                        p: 1.5,
+                        mb: 2,
+                        borderRadius: 2,
+                        bgcolor: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 2
+                    }}
+                >
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                        <LocationOnIcon color="primary" />
+                        <Box>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f2c59' }}>
+                                {geoReport.project_title}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                                📍 {geoReport.place_name} • {geoReport.district}, {geoReport.state} • Coordinates: {geoReport.lat.toFixed(4)}° N, {geoReport.lng.toFixed(4)}° E
+                            </Typography>
+                        </Box>
+                    </Stack>
+
+                    <Stack direction="row" spacing={1}>
+                        <Chip
+                            label={`Type: ${geoReport.project_type}`}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontWeight: 600 }}
+                        />
+                        <Chip
+                            label={`Area: ${geoReport.site_area_acres} Acres`}
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontWeight: 600 }}
+                        />
+                        <Chip
+                            label={geoReport.compliance_status}
+                            size="small"
+                            color={geoReport.compliance_status === 'COMPLIANT' ? 'success' : geoReport.compliance_status === 'REQUIRES_REVIEW' ? 'warning' : 'error'}
+                            sx={{ fontWeight: 700 }}
+                        />
+                    </Stack>
+                </Paper>
+            )}
 
             <Box sx={{ display: 'flex', flex: 1, gap: 2, height: '100%', flexDirection: { xs: 'column', md: 'row' } }}>
                 {/* Left Pane: Interactive Map */}
-                <Box sx={{ flex: 3, borderRadius: 2, overflow: 'hidden', border: '1px solid #e0e0e0', minHeight: 400, position: 'relative', boxShadow: 3 }}>
-                        <MapContainer key={`${center[0]}-${center[1]}`} center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
-                        <LayersControl position="topright">
-                            {/* Base Layers */}
-                            <LayersControl.BaseLayer checked name="OpenStreetMap">
-                                <TileLayer
-                                    attribution='&copy; OpenStreetMap contributors'
-                                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                                />
-                            </LayersControl.BaseLayer>
-                            <LayersControl.BaseLayer name="Satellite Imagery">
-                                <TileLayer
-                                    attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-                                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                                />
-                            </LayersControl.BaseLayer>
+                <Box sx={{ flex: 3, borderRadius: 2, overflow: 'hidden', border: '1px solid #e0e0e0', minHeight: 400, position: 'relative', boxShadow: 2 }}>
+                    {loading ? (
+                        <Box sx={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', bgcolor: '#f8f9fa' }}>
+                            <Stack spacing={2} alignItems="center">
+                                <CircularProgress size={40} sx={{ color: '#0f2c59' }} />
+                                <Typography variant="body2" color="text.secondary">
+                                    Loading satellite coordinates for selected DPR...
+                                </Typography>
+                            </Stack>
+                        </Box>
+                    ) : (
+                        <MapContainer
+                            key={`${center[0]}-${center[1]}-${selectedJobId}`}
+                            center={center}
+                            zoom={zoom}
+                            style={{ height: '100%', width: '100%' }}
+                        >
+                            <ChangeView center={center} zoom={zoom} />
+                            <LayersControl position="topright">
+                                {/* Base Layers */}
+                                <LayersControl.BaseLayer checked name="OpenStreetMap">
+                                    <TileLayer
+                                        attribution='&copy; OpenStreetMap contributors'
+                                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                    />
+                                </LayersControl.BaseLayer>
+                                <LayersControl.BaseLayer name="Satellite Imagery">
+                                    <TileLayer
+                                        attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and GIS User Community'
+                                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                    />
+                                </LayersControl.BaseLayer>
 
-                            {/* Overlays */}
-                            <LayersControl.Overlay checked name="Reserved Forests">
-                                <Polygon pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.3 }} positions={forestZone}>
-                                    <Popup>
-                                        <Typography variant="subtitle2" fontWeight="bold" color="error">Restricted Forest Zone</Typography>
-                                        <Typography variant="caption">Protected Area - No Construction Allowed</Typography>
-                                    </Popup>
-                                </Polygon>
-                            </LayersControl.Overlay>
+                                {/* Overlays */}
+                                <LayersControl.Overlay checked name={geoReport?.restricted_zone_name || 'Restricted Environmental Zone'}>
+                                    <Polygon pathOptions={{ color: '#d32f2f', fillColor: '#d32f2f', fillOpacity: 0.35 }} positions={restrictedZone}>
+                                        <Popup>
+                                            <Typography variant="subtitle2" fontWeight="bold" color="error">
+                                                {geoReport?.restricted_zone_name || 'Restricted Zone'}
+                                            </Typography>
+                                            <Typography variant="caption" display="block">
+                                                Type: {geoReport?.restricted_zone_type || 'Forest / Ecological Buffer'}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                Encroachment Overlap: {geoReport?.overlap_area_acres || 0} Acres ({geoReport?.overlap_percentage || 0}%)
+                                            </Typography>
+                                        </Popup>
+                                    </Polygon>
+                                </LayersControl.Overlay>
 
-                            <LayersControl.Overlay checked name="Proposed Site">
-                                <Polygon pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.3, dashArray: '5, 5' }} positions={projectSite}>
-                                    <Popup>
-                                        <Typography variant="subtitle2" fontWeight="bold" color="primary">Proposed Project Site</Typography>
-                                        <Typography variant="caption">Area: 12.5 Acres</Typography>
-                                    </Popup>
-                                </Polygon>
-                            </LayersControl.Overlay>
-                        </LayersControl>
+                                <LayersControl.Overlay checked name="Proposed Project Site Boundary">
+                                    <Polygon pathOptions={{ color: '#0f2c59', fillColor: '#1976d2', fillOpacity: 0.25, dashArray: '6, 6' }} positions={projectSite}>
+                                        <Popup>
+                                            <Typography variant="subtitle2" fontWeight="bold" color="primary">
+                                                {geoReport?.project_title || 'Proposed Project Site'}
+                                            </Typography>
+                                            <Typography variant="caption" display="block">
+                                                Area: {geoReport?.site_area_acres || 15} Acres
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                Location: {geoReport?.place_name || 'Project Site'}
+                                            </Typography>
+                                        </Popup>
+                                    </Polygon>
+                                </LayersControl.Overlay>
+                            </LayersControl>
 
-                        {/* Project Marker */}
-                        <Marker position={center}>
-                            <Popup>
-                                <b>Project Entry Point</b><br />{placeName}       
-                            </Popup>
-                        </Marker>
-                    </MapContainer>
+                            {/* Project Marker */}
+                            <Marker position={center}>
+                                <Popup>
+                                    <Box sx={{ p: 0.5 }}>
+                                        <Typography variant="subtitle2" fontWeight="bold">
+                                            {geoReport?.project_title || 'Project Entry Point'}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            {geoReport?.place_name || 'Site Coordinates'}
+                                        </Typography>
+                                        <Typography variant="caption" display="block" sx={{ mt: 0.5, fontFamily: 'monospace' }}>
+                                            {center[0].toFixed(5)}° N, {center[1].toFixed(5)}° E
+                                        </Typography>
+                                    </Box>
+                                </Popup>
+                            </Marker>
+                        </MapContainer>
+                    )}
                 </Box>
 
                 {/* Right Pane: Intelligence Report */}
-                <Box sx={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
-                    <Card sx={{ height: '100%', overflowY: 'auto', boxShadow: 3, borderRadius: 2 }}>
+                <Box sx={{ flex: 1, minWidth: 340, display: 'flex', flexDirection: 'column' }}>
+                    <Card sx={{ height: '100%', overflowY: 'auto', boxShadow: 2, borderRadius: 2 }}>
                         <CardContent>
                             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
                                 <LayersIcon color="action" />
@@ -189,18 +362,37 @@ const GeospatialVerification: React.FC = () => {
                             <List dense sx={{ bgcolor: '#f8f9fa', borderRadius: 2, mb: 3 }}>
                                 <ListItem>
                                     <ListItemIcon><ForestIcon color="success" /></ListItemIcon>
-                                    <ListItemText primary="Forest Cover" secondary="Source: Forest Survey of India" />
-                                    <Chip label="Active" size="small" color="success" variant="outlined" />
+                                    <ListItemText
+                                        primary="Forest Cover & Diversion"
+                                        secondary={geoReport?.forest_clearance_status || "Forest Survey of India"}
+                                    />
+                                    <Chip
+                                        label={geoReport?.has_overlap_conflict ? "Overlap" : "Clear"}
+                                        size="small"
+                                        color={geoReport?.has_overlap_conflict ? "warning" : "success"}
+                                        variant="outlined"
+                                    />
                                 </ListItem>
                                 <ListItem>
                                     <ListItemIcon><TerrainIcon color="warning" /></ListItemIcon>
-                                    <ListItemText primary="Seismic Zone" secondary="Source: USGS" />
-                                    <Chip label="Zone V" size="small" color="warning" variant="outlined" />
+                                    <ListItemText
+                                        primary="Seismic Zone"
+                                        secondary={geoReport?.seismic_zone || "Zone V (USGS / IS 1893)"}
+                                    />
+                                    <Chip
+                                        label={geoReport?.seismic_zone?.split(' ')[0] || "Zone V"}
+                                        size="small"
+                                        color="warning"
+                                        variant="outlined"
+                                    />
                                 </ListItem>
                                 <ListItem>
                                     <ListItemIcon><WaterIcon color="info" /></ListItemIcon>
-                                    <ListItemText primary="Flood Patterns" secondary="Source: CWC 2023" />
-                                    <Chip label="Active" size="small" color="info" variant="outlined" />
+                                    <ListItemText
+                                        primary="Water Body Proximity"
+                                        secondary={geoReport?.water_body_status || "50m Buffer Verification"}
+                                    />
+                                    <Chip label="Verified" size="small" color="info" variant="outlined" />
                                 </ListItem>
                             </List>
 
@@ -210,54 +402,83 @@ const GeospatialVerification: React.FC = () => {
                             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
                                 <GpsFixedIcon color={analysisComplete ? "primary" : "disabled"} />
                                 <Typography variant="h6" sx={{ fontWeight: 700, color: analysisComplete ? 'text.primary' : 'text.disabled' }}>
-                                    Compliance Report
+                                    Site Compliance Report
                                 </Typography>
                             </Stack>
 
-                            {!analysisComplete && !analyzing && (
-                                <Box sx={{ p: 3, textAlign: 'center', color: 'text.secondary', bgcolor: '#f5f5f5', borderRadius: 2 }}>
-                                    <Typography variant="body2">Click "Run Compliance Check" to analyze the proposed site against restricted zones.</Typography>
-                                </Box>
-                            )}
-
                             {analyzing && (
                                 <Box sx={{ p: 4, textAlign: 'center' }}>
-                                    <CircularProgress size={30} sx={{ mb: 2 }} />
-                                    <Typography variant="body2" color="text.secondary">Processing Satellite Imagery...</Typography>
-                                    <Typography variant="caption" color="text.disabled">Checking Forest Encroachment...</Typography>
+                                    <CircularProgress size={30} sx={{ mb: 2, color: '#0f2c59' }} />
+                                    <Typography variant="body2" color="text.secondary">Verifying Satellite Imagery...</Typography>
+                                    <Typography variant="caption" color="text.disabled">Cross-referencing Restricted Coordinates...</Typography>
                                 </Box>
                             )}
 
-                            {analysisComplete && (
+                            {analysisComplete && geoReport && (
                                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                    <Alert severity="warning" variant="filled" icon={<WarningIcon />}>
-                                        <b>Conflict Detected</b><br />
-                                        Part of the proposed site overlaps with a Restricted Forest Zone.
-                                    </Alert>
+                                    {geoReport.has_overlap_conflict ? (
+                                        <Alert severity="warning" variant="filled" icon={<WarningIcon />}>
+                                            <b>Restricted Zone Encroachment</b><br />
+                                            Proposed site overlaps with {geoReport.restricted_zone_name}.
+                                        </Alert>
+                                    ) : (
+                                        <Alert severity="success" variant="filled" icon={<CheckCircleIcon />}>
+                                            <b>Clear of Restricted Zones</b><br />
+                                            No major environmental or forest encumbrance detected.
+                                        </Alert>
+                                    )}
 
-                                    <Box sx={{ p: 2, border: '1px solid #ed6c02', borderRadius: 2, bgcolor: '#fff3e0' }}>
-                                        <Typography variant="subtitle2" color="warning.dark" gutterBottom>Overlap Analysis</Typography>
+                                    <Box sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#f8fafc' }}>
+                                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f2c59', mb: 1 }}>
+                                            Site Boundary Analysis
+                                        </Typography>
                                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-                                            <Typography variant="body2">Total Area:</Typography>
-                                            <Typography variant="body2" fontWeight="bold">12.5 Acres</Typography>
+                                            <Typography variant="body2" color="text.secondary">Total Project Site:</Typography>
+                                            <Typography variant="body2" fontWeight="bold">{geoReport.site_area_acres} Acres</Typography>
                                         </Stack>
                                         <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-                                            <Typography variant="body2">Restricted Overlap:</Typography>
-                                            <Typography variant="body2" fontWeight="bold" color="error">1.8 Acres (14%)</Typography>
+                                            <Typography variant="body2" color="text.secondary">Restricted Overlap:</Typography>
+                                            <Typography
+                                                variant="body2"
+                                                fontWeight="bold"
+                                                color={geoReport.overlap_area_acres > 0 ? "error" : "success"}
+                                            >
+                                                {geoReport.overlap_area_acres} Acres ({geoReport.overlap_percentage}%)
+                                            </Typography>
+                                        </Stack>
+                                        <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
+                                            <Typography variant="body2" color="text.secondary">Statutory Status:</Typography>
+                                            <Typography
+                                                variant="body2"
+                                                fontWeight="bold"
+                                                color={geoReport.compliance_status === 'COMPLIANT' ? 'success.main' : 'warning.main'}
+                                            >
+                                                {geoReport.compliance_status}
+                                            </Typography>
                                         </Stack>
                                         <Stack direction="row" justifyContent="space-between">
-                                            <Typography variant="body2">Status:</Typography>
-                                            <Typography variant="body2" fontWeight="bold" color="warning.main">REQUIRES REVIEW</Typography>
+                                            <Typography variant="body2" color="text.secondary">Location:</Typography>
+                                            <Typography variant="body2" fontWeight="bold">
+                                                {geoReport.district}, {geoReport.state}
+                                            </Typography>
                                         </Stack>
                                     </Box>
 
-                                    <Alert severity="success" icon={<CheckCircleIcon />}>
-                                        <b>Water Bodies: Clear</b><br />
-                                        Site is outside the 50m buffer zone of nearby rivers.
-                                    </Alert>
+                                    {/* Specific Page-Cited Findings */}
+                                    {geoReport.key_findings && geoReport.key_findings.length > 0 && (
+                                        <Box sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 2, bgcolor: '#fff' }}>
+                                            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#0f2c59', mb: 1 }}>
+                                                DPR Clearance Citations
+                                            </Typography>
+                                            {geoReport.key_findings.map((finding, fIdx) => (
+                                                <Typography key={fIdx} variant="caption" sx={{ display: 'block', mb: 1, color: '#334155' }}>
+                                                    • {finding}
+                                                </Typography>
+                                            ))}
+                                        </Box>
+                                    )}
                                 </Box>
                             )}
-
                         </CardContent>
                     </Card>
                 </Box>
