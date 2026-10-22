@@ -137,8 +137,8 @@ const GeospatialVerification: React.FC = () => {
 
     const center: [number, number] = geoReport ? [geoReport.lat, geoReport.lng] : [26.1445, 91.7362];
     const zoom = geoReport?.zoom_level || 13;
-    const projectSite = (geoReport?.project_boundary && geoReport.project_boundary.length >= 3)
-        ? geoReport.project_boundary as [number, number][]
+    const projectSite: [number, number][] = (geoReport?.project_boundary && geoReport.project_boundary.length >= 3)
+        ? (geoReport.project_boundary as [number, number][])
         : [
             [center[0] + 0.0035, center[1] - 0.0012],
             [center[0] + 0.0105, center[1] + 0.0088],
@@ -146,8 +146,8 @@ const GeospatialVerification: React.FC = () => {
             [center[0] - 0.0045, center[1] + 0.0038]
         ];
 
-    const restrictedZone = (geoReport?.restricted_zone_boundary && geoReport.restricted_zone_boundary.length >= 3)
-        ? geoReport.restricted_zone_boundary as [number, number][]
+    const restrictedZone: [number, number][] = (geoReport?.restricted_zone_boundary && geoReport.restricted_zone_boundary.length >= 3)
+        ? (geoReport.restricted_zone_boundary as [number, number][])
         : [
             [center[0] + 0.0055, center[1] + 0.0038],
             [center[0] + 0.0155, center[1] + 0.0138],

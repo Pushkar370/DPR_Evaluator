@@ -57,6 +57,7 @@
     "@typescript-eslint/parser": "^6.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "eslint": "^8.45.0",
+    "jsdom": "^29.1.1",
     "typescript": "^5.0.0",
     "vite": "^7.1.9",
     "vitest": "^0.34.0"
