@@ -696,3 +696,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 ![Made in India](https://img.shields.io/badge/Made%20in-India-ff9933?style=for-the-badge)
 
 </div>
+
+Developed By: Laxmi Shingne
+              Pushkar Thakare
+              Atmaj Suryavanshi
