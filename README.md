@@ -697,6 +697,6 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 </div>
 
-Developed By: Laxmi Shingne
-              Pushkar Thakare
+Developed By: Laxmi Shingne,
+              Pushkar Thakare,
               Atmaj Suryavanshi
